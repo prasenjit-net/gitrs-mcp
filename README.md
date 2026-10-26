@@ -6,10 +6,11 @@ It lets AI assistants inspect a Git repository through typed tools with structur
 
 - **Local only, by construction.** gix is compiled without any network features, so fetch, push and clone can't happen.
 - **Read-only by default.** Write tools (coming in Phase 3) will exist only when you start the server with `--allow-write`.
+- **Git-compatible.** Results match the `git` CLI on the same repository: the test suite checks each tool against real `git` output, and generated patches apply with `git apply`.
 - **Structured output.** Every tool returns JSON with a published output schema. Bad input, such as an unknown revision, comes back as a tool error the model can read and correct.
 - **Pure Rust.** It runs as a single static binary that speaks MCP over stdio, and it doesn't need `libgit2` or the `git` executable.
 
-> **Status:** early development, at Phase 0 of the [roadmap](ROADMAP.md). The current tools are read-only history and ref inspection.
+> **Status:** early development. Phases 0 and 1 of the [roadmap](ROADMAP.md) are done: 13 read-only tools covering status, diffs, file contents, history, blame and refs. Write tools come in Phase 3.
 
 ## Install
 
@@ -60,49 +61,69 @@ From a clone, `make mcp-add REPO=/path/to/repo` builds a release binary and regi
 }
 ```
 
+Setup for other clients, logging, and the git settings that affect results are in [docs/configuration.md](docs/configuration.md).
+
 ## Tools
 
-Revision arguments accept anything `git rev-parse` does: SHAs and SHA prefixes, branches, tags, `HEAD~2`, `v1.0^{commit}`, and so on.
+Revision arguments accept anything `git rev-parse` does: SHAs and SHA prefixes, branches, tags, `HEAD~2`, `v1.0^{commit}`, and so on. Paths and pathspecs are relative to the repository root. Every list is paginated and reports `truncated`, and file contents and patches stay within a byte budget (64 KiB by default).
 
 | Tool | Arguments | Returns |
 |---|---|---|
-| `repo_info` | none | git dir, worktree, bare/shallow flags, current branch, HEAD commit, in-progress operation (merge, rebase, …) |
-| `log` | `rev?` (default `HEAD`), `limit?` (default 20, max 500), `skip?`, `first_parent?` | Commits newest first (id, short id, summary, author, parents) plus a `truncated` flag for pagination |
+| `status` | `pathspec?`, `include_untracked?` (default true), `include_ignored?`, `limit?` | Branch, HEAD, configured upstream, and staged, unstaged, untracked, ignored and conflicted paths, with full counts |
+| `diff` | `from?`, `to?`, `staged?`, `pathspec?`, `format?`: `stat` (default), `name_status`, `patch`; `context_lines?`, `max_bytes?`, `limit?`, `skip?` | Changed files with status, line counts and git-compatible patches. Compares worktree↔index (default), index↔revision (`staged`) or two revisions (`from` + `to`) |
+| `read_file` | `path`, `rev?` (default `HEAD`; or `index`, `worktree`), `offset_bytes?`, `max_bytes?` | File content as UTF-8 or base64, with size, mode, blob id, and `next_offset` for chunked reads |
+| `list_tree` | `rev?`, `path?`, `recursive?`, `limit?`, `skip?` | Tree entries (path, kind, mode, id, size) in `git ls-tree` order |
+| `blame` | `path`, `rev?`, `line_range?`, `limit?` | Hunks of lines with the commit, author and summary that last changed them, following renames |
+| `log` | `rev?` (default `HEAD`), `limit?` (default 20, max 500), `skip?`, `first_parent?` | Commits newest first (id, short id, summary, author, parents) |
 | `show_commit` | `rev?` (default `HEAD`) | Full commit: tree, parents, author, committer, summary, full message |
+| `file_history` | `path`, `rev?`, `limit?`, `skip?`, `follow_renames?` | Commits that changed a file or directory, like `git log -- <path>`, with how each changed it |
+| `search_commits` | `message_regex?`, `author?`, `since?`, `until?`, `path?`, `rev?`, `limit?`, `skip?` | Commits matching every given filter, newest first |
+| `rev_parse` | `spec` | Full SHAs and object type for a revision or a range (`a..b`, `a...b` with merge base) |
+| `compare_refs` | `base`, `head`, `limit?` | Merge base, ahead/behind counts, and the newest commits on each side |
 | `list_refs` | `kind?`: `branches` (default), `tags`, `all` | Refs with full and short names, peeled target commit, and which branch HEAD is on |
+| `repo_info` | none | git dir, worktree, bare/shallow flags, current branch, HEAD commit, in-progress operation (merge, rebase, …) |
 
-The next phases add `status`, `diff`, `read_file`, `blame`, `grep`, safe write tools behind `--allow-write`, and more. The full plan is in [ROADMAP.md](ROADMAP.md).
+The full reference, with every argument, result field, error and a real example per tool, is in [docs/tools.md](docs/tools.md). Later phases add `grep`, `describe`, reflog and stash inspection, then safe write tools behind `--allow-write`; see [ROADMAP.md](ROADMAP.md).
+
+## Documentation
+
+- [docs/tools.md](docs/tools.md): tool reference.
+- [docs/configuration.md](docs/configuration.md): CLI flags, environment, git settings that affect results, and client setup.
+- [docs/architecture.md](docs/architecture.md): layers, data flow, the sync/async bridge, and the safety model.
+- [docs/development.md](docs/development.md): setup, make targets, adding a tool, testing and coverage.
 
 ## Development
 
 ```sh
 make            # list all targets
 make test       # unit tests (fixture repos are built with the system `git`)
-make smoke      # end-to-end MCP round trip over stdio against REPO (default .)
+make smoke      # end-to-end MCP round trip over stdio, calling every tool against REPO (default .)
 make inspector  # explore the tools interactively in the MCP Inspector (needs npx)
 make check      # fmt-check + clippy + test + smoke: what CI should run
 make coverage   # coverage summary, fails below 80% lines (needs `cargo install cargo-llvm-cov`)
 ```
 
-Contributor rules (code quality, MCP documentation, testing and the pre-commit checklist) are in [CLAUDE.md](CLAUDE.md).
+Every target accepts `REPO=<path>`, `ARGS="<extra server flags>"` and `LOG=<level>`. `make smoke` also takes `FILE=<tracked file>` (default `README.md`) for the tools that need a path.
 
-Every target accepts `REPO=<path>`, `ARGS="<extra server flags>"` and `LOG=<level>`.
+Contributor rules (code quality, MCP documentation, testing and the pre-commit checklist) are in [CLAUDE.md](CLAUDE.md), and the step-by-step guide to adding a tool is in [docs/development.md](docs/development.md).
 
 ### Layout
 
 ```
 src/
-├─ main.rs        CLI arguments, logging, stdio transport
-├─ server.rs      MCP tool registration (thin async wrappers)
-├─ repo.rs        Thread-safe repo handle; runs gix calls on the blocking pool
-└─ tools/         Git logic as plain sync functions over &gix::Repository
-   ├─ repo.rs     repo_info
-   ├─ history.rs  log, show_commit
-   └─ refs.rs     list_refs
-scripts/smoke.sh  stdio MCP smoke test
+├─ main.rs          CLI arguments, logging, stdio transport
+├─ server.rs        MCP tool registration (thin async wrappers)
+├─ repo.rs          Thread-safe repo handle; runs gix calls on the blocking pool
+└─ tools/           Git logic as plain sync functions over &gix::Repository
+   ├─ mod.rs        shared types and helpers, test fixtures
+   ├─ repo.rs       repo_info
+   ├─ refs.rs       list_refs
+   ├─ revision.rs   rev_parse, compare_refs
+   ├─ status.rs     status
+   ├─ diff.rs       diff
+   ├─ files.rs      read_file, list_tree
+   ├─ blame.rs      blame
+   └─ history.rs    log, show_commit, file_history, search_commits
+scripts/smoke.sh    stdio MCP smoke test
+docs/               user and contributor documentation
 ```
-
-To add a tool:
-1. Write a sync function in `tools/<area>.rs` that takes a `Deserialize + JsonSchema` args struct and returns a `Serialize + JsonSchema` result. Doc comments on the fields become the schema descriptions the model sees.
-2. Add a few-line `#[tool]` wrapper in `server.rs`.
-3. Write tests that compare the result with real `git` on a fixture repo.

@@ -2,6 +2,7 @@
 
 BIN      := gitrs-mcp
 REPO     ?= .
+FILE     ?= README.md
 ARGS     ?=
 LOG      ?= info
 DEBUG_BIN   := target/debug/$(BIN)
@@ -15,6 +16,7 @@ help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 	@echo
 	@echo "  Variables: REPO=<path> (default .)  ARGS=<extra server args>  LOG=<level> (default info)"
+	@echo "             FILE=<tracked file in REPO> for smoke (default README.md)"
 
 ## --- Build ---------------------------------------------------------------
 
@@ -32,8 +34,8 @@ run: build ## Run the server read-only on REPO over stdio
 run-write: build ## Run the server with --allow-write on REPO
 	GITRS_LOG=$(LOG) $(DEBUG_BIN) --repo $(REPO) --allow-write $(ARGS)
 
-smoke: build ## End-to-end MCP round trip (initialize, tools/list, tool calls) on REPO
-	scripts/smoke.sh $(DEBUG_BIN) $(REPO)
+smoke: build ## End-to-end MCP round trip (initialize, tools/list, every tool) on REPO
+	scripts/smoke.sh $(DEBUG_BIN) $(REPO) $(FILE)
 
 inspector: build ## Open the MCP Inspector UI against the server (needs npx)
 	npx -y @modelcontextprotocol/inspector $(abspath $(DEBUG_BIN)) --repo $(abspath $(REPO)) $(ARGS)

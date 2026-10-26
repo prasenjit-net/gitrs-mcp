@@ -19,10 +19,15 @@ src/
 ├─ server.rs        #[tool_router] — thin async wrappers + ServerHandler metadata
 ├─ repo.rs          RepoHandle: ThreadSafeRepository + spawn_blocking bridge
 └─ tools/
-   ├─ mod.rs        shared output types (Signature, …), test fixtures
+   ├─ mod.rs        shared output types (Signature, LogEntry, ChangeKind), arg helpers, test fixtures
    ├─ repo.rs       repo_info
-   ├─ history.rs    log, show_commit
-   └─ refs.rs       list_refs
+   ├─ refs.rs       list_refs
+   ├─ revision.rs   rev_parse, compare_refs
+   ├─ status.rs     status
+   ├─ diff.rs       diff (and the tree↔index comparison status reuses)
+   ├─ files.rs      read_file, list_tree
+   ├─ blame.rs      blame
+   └─ history.rs    log, show_commit, file_history, search_commits
 ```
 
 Conventions for every new tool:
@@ -47,9 +52,11 @@ Infrastructure is in place: `--repo`, `--allow-write`, tracing to stderr via `GI
 
 ---
 
-## Phase 1: Core read (the everyday 80%)
+## Phase 1: Core read (the everyday 80%) ✅ (done)
 
 These tools let an agent understand "what's going on in this repo" without shelling out.
+
+All nine tools shipped, each tested against the git CLI (`git status --porcelain=v2`, `git diff` numstat, name-status and full patch text, `git apply --index`, `git ls-tree`, `git log -- <path>`, `git log --follow`, `git rev-list`, `git rev-parse`, `git merge-base`, `git blame --porcelain`). The full reference is in [docs/tools.md](docs/tools.md). Where the implementation differs from the specs below, the reasons are in [Phase 1: deviations from the plan](#phase-1-deviations-from-the-plan).
 
 ### `status`
 - **In:** `pathspec?: string[]`, `include_untracked: bool = true`, `include_ignored: bool = false`.
@@ -100,6 +107,35 @@ These tools let an agent understand "what's going on in this repo" without shell
 - **Tests:** compare with `git blame --porcelain` on the fixture.
 
 **Exit criteria:** an agent can do "what did I change, why, and where did this line come from" entirely through MCP. Every output is checked against the git CLI.
+
+### Phase 1: deviations from the plan
+
+- **Across tools.**
+  - Every list takes `limit` (and `skip` where paging makes sense) and reports `truncated`, as the design principles require; the specs above didn't always list these.
+  - The server now changes to the repository root at startup. gix resolves pathspecs against the working directory captured when a repo is opened, so without this, launching from a subdirectory would shift every path argument.
+- **`status`.**
+  - `upstream` reports the configured tracking ref from local config (e.g. `refs/remotes/origin/main`) instead of always `null`. It reads only local data, so the local-only promise still holds.
+  - Added `ignored`, `counts`, `truncated`, `clean` and `limit`. `copied` is reported when copy detection is configured.
+  - The HEAD↔index side reuses `diff`'s staged comparison, so both tools apply the same rename settings and gix workarounds.
+- **`diff`.**
+  - `from` alone (revision ↔ worktree, `git diff <rev>`) is refused with an explanation; `staged: true` with `from` compares a revision with the index instead. Revision ↔ worktree needs a combined tree/index/worktree walk and can come later.
+  - Added `mode`, `unmerged`, `limit`/`skip`, per-file `binary` and `patch_truncated`.
+  - Patches are rendered by our own hunk writer, so they match `git diff` byte for byte: compact hunk ranges, git's default function context in `@@` headers, `\ No newline at end of file`, and `Subproject commit` lines for submodules. A submodule that is only dirty (no new commit) isn't reported, as with `git diff --ignore-submodules=dirty`.
+  - The first patch that overflows `max_bytes` is cut at a line boundary rather than dropped.
+- **`read_file`.**
+  - Added `mode`, `path` and `next_offset`, and chunks never split a UTF-8 character.
+  - Worktree reads refuse `.git/` and paths that escape through a symlinked directory. A symlink is returned as its target, never followed.
+- **`list_tree`.** Recursive listings match `git ls-tree -r`: no directory entries. Added `skip` and `total`.
+- **`rev_parse`.** Besides `single`, `range` and `merge_base_range`, it reports `exclude` (`^a`), `include_only_parents` (`a^@`) and `exclude_parents` (`a^!`). `merge_base` is filled in for `a...b`.
+- **`file_history`.**
+  - Implements git's default history simplification rather than listing every commit whose tree entry differs, so results match plain `git log -- <path>`.
+  - `follow_renames` shipped now rather than later, and matches `git log --follow` on the tests' rename scenarios.
+- **`search_commits`.**
+  - `author` is a regex over `Name <email>`, like `git log --author`.
+  - Dates use gix-date, so relative forms such as `2 weeks ago` work.
+  - A `path` filter uses the same simplified walk as `file_history`, and `skip` was added.
+- **`compare_refs`.** Added `limit` and `truncated`.
+- **`blame`.** Added `line_count`, `original_start_line` and `limit`. Renames are followed by default, as in `git blame`.
 
 ---
 
@@ -211,13 +247,16 @@ gix has no sequencer, so this phase is where we build our own logic on its primi
 | Hooks | `commit` skips `pre-commit`/`commit-msg` | Document it. Optional `--run-hooks` executes them as subprocesses |
 | Commit/tag signing | Signed commits | Out of scope at first. Maybe shell out to `gpg`/`ssh-keygen -Y sign` later |
 | Network | n/a | Intentionally excluded |
+| Copy detection drops a modified copy source (found in Phase 1) | With `diff.renames=copies`, a copy whose source was also modified is reported as a copy of the source's *new* content, and the source's own modification disappears | Worked around in `tools/diff.rs` (`repair_copies`): point the copy back at the old content and restore the source's change |
+| `status.renames` read from the wrong section (found in Phase 1) | gix looks the key up as `merge.renames`, so `status.renames` is ignored | Worked around in `tools/diff.rs` (`index_rename_tracking`): resolve `status.renames`, then `diff.renames`, ourselves |
+| Unified diff output differs from git (found in Phase 1) | gix's unified-diff helpers print `,1` ranges and no function context, and its default line input strips terminators, which loses `\ No newline at end of file` | Own hunk writer in `tools/diff.rs` on top of gix's line diff |
 
 ## Milestone summary
 
 | Phase | Tools | Rough size |
 |---|---|---|
 | 0 Scaffold | 4 | done |
-| 1 Core read | 9 | ~2–3k LOC + tests |
+| 1 Core read | 9 | done |
 | 2 Deep read | 14 | ~2k LOC |
 | 3 Safe writes | 10 | ~2–3k LOC (index writing and checkout safety are the hard parts) |
 | 4 Rewriting | 8 | ~3–4k LOC (sequencer and stash) |

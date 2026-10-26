@@ -2,6 +2,8 @@
 
 use std::path::Path;
 
+use anyhow::Context;
+
 /// A thread-safe handle to the served repository.
 ///
 /// gix is synchronous and `gix::Repository` is `!Sync`, so every tool call runs
@@ -12,9 +14,22 @@ pub struct RepoHandle {
 }
 
 impl RepoHandle {
+    /// Find the repository containing `path` and make its root the process working directory.
+    ///
+    /// gix resolves pathspecs against the working directory captured when a repository is opened.
+    /// Tool arguments are documented as relative to the repository root, so a server launched from a
+    /// subdirectory would otherwise silently shift every path. Changing directory and reopening keeps
+    /// them root-relative.
     pub fn discover(path: &Path) -> anyhow::Result<Self> {
+        let found = gix::ThreadSafeRepository::discover(path)?;
+        // Discovery can return a relative root such as `..`; make it absolute before moving into it.
+        let root = found.work_dir().unwrap_or_else(|| found.git_dir());
+        let root = std::fs::canonicalize(root)
+            .with_context(|| format!("cannot resolve repository root {}", root.display()))?;
+        std::env::set_current_dir(&root)
+            .with_context(|| format!("cannot change directory to {}", root.display()))?;
         Ok(Self {
-            repo: gix::ThreadSafeRepository::discover(path)?,
+            repo: gix::ThreadSafeRepository::open(&root)?,
         })
     }
 

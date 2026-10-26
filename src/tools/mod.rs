@@ -1,17 +1,34 @@
 //! Tool implementations: sync functions over `&gix::Repository` returning
 //! serde/schemars types that become the tools' structured output.
+//!
+//! Shared output types and argument helpers (rev defaults, pagination, byte
+//! budgets, path normalization) live here so every tool behaves the same way.
 
+pub mod blame;
+pub mod diff;
+pub mod files;
 pub mod history;
 pub mod refs;
 pub mod repo;
+pub mod revision;
+pub mod status;
 
+use anyhow::{Context, bail};
+use gix::bstr::BString;
 use schemars::JsonSchema;
 use serde::Serialize;
 
+/// Default byte budget for content-bearing results (file content, patches): about 64 KiB per call.
+pub const DEFAULT_MAX_BYTES: usize = 64 * 1024;
+/// Upper bound for a caller-supplied `max_bytes`.
+pub const MAX_MAX_BYTES: usize = 1024 * 1024;
+
 /// A person + timestamp, as recorded in a commit or tag.
-#[derive(Debug, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct Signature {
+    /// Name as recorded in the commit.
     pub name: String,
+    /// Email as recorded in the commit.
     pub email: String,
     /// Seconds since the Unix epoch.
     pub time: i64,
@@ -31,6 +48,197 @@ impl Signature {
     }
 }
 
+/// One commit in a history listing.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct LogEntry {
+    /// Full commit SHA.
+    pub id: String,
+    /// Abbreviated SHA, unique within the repository.
+    pub short_id: String,
+    /// First line of the commit message.
+    pub summary: String,
+    /// Who wrote the change, and when.
+    pub author: Signature,
+    /// Full SHAs of the parent commits; empty for a root commit.
+    pub parents: Vec<String>,
+}
+
+impl LogEntry {
+    pub fn from_commit(commit: &gix::Commit<'_>) -> anyhow::Result<Self> {
+        Ok(Self {
+            id: commit.id.to_string(),
+            short_id: commit.short_id()?.to_string(),
+            summary: commit.message()?.summary().to_string(),
+            author: Signature::from_ref(commit.author()?)?,
+            parents: commit.parent_ids().map(|p| p.to_string()).collect(),
+        })
+    }
+}
+
+/// How a path changed between two versions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum ChangeKind {
+    Added,
+    Modified,
+    Deleted,
+    /// Moved from `old_path`, possibly with edits.
+    Renamed,
+    /// Copied from `old_path`, possibly with edits.
+    Copied,
+    /// Changed type, e.g. from a regular file to a symlink.
+    Typechange,
+}
+
+impl ChangeKind {
+    /// `Modified`, or `Typechange` when the entry switched between file, symlink, tree or submodule.
+    /// Flipping only the executable bit is a modification, as in git.
+    pub fn of_modification(
+        old: gix::object::tree::EntryKind,
+        new: gix::object::tree::EntryKind,
+    ) -> Self {
+        use gix::object::tree::EntryKind::{Blob, BlobExecutable};
+        let same_type =
+            old == new || matches!((old, new), (Blob, BlobExecutable) | (BlobExecutable, Blob));
+        if same_type {
+            Self::Modified
+        } else {
+            Self::Typechange
+        }
+    }
+}
+
+/// Clamp a caller-supplied page size to `1..=max`, defaulting to `default`.
+pub fn page_limit(limit: Option<usize>, default: usize, max: usize) -> usize {
+    limit.unwrap_or(default).clamp(1, max)
+}
+
+/// Clamp a caller-supplied byte budget to `1..=MAX_MAX_BYTES`, defaulting to [`DEFAULT_MAX_BYTES`].
+pub fn byte_budget(max_bytes: Option<usize>) -> usize {
+    max_bytes
+        .unwrap_or(DEFAULT_MAX_BYTES)
+        .clamp(1, MAX_MAX_BYTES)
+}
+
+/// Collect one page from `items`: skip `skip`, take `limit`, and report whether more remained.
+///
+/// Only pulls one item past the page, so lazy walks stay cheap.
+pub fn paginate<T>(
+    items: impl IntoIterator<Item = anyhow::Result<T>>,
+    skip: usize,
+    limit: usize,
+) -> anyhow::Result<(Vec<T>, bool)> {
+    let mut iter = items.into_iter().skip(skip);
+    let page = iter
+        .by_ref()
+        .take(limit)
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    let truncated = iter.next().transpose()?.is_some();
+    Ok((page, truncated))
+}
+
+/// Resolve `rev` (default `HEAD`) to a commit, peeling tags.
+pub fn resolve_commit<'repo>(
+    repo: &'repo gix::Repository,
+    rev: Option<&str>,
+) -> anyhow::Result<gix::Commit<'repo>> {
+    let rev = rev.unwrap_or("HEAD");
+    ensure_head_is_born(repo, rev)?;
+    repo.rev_parse_single(rev)
+        .map_err(anyhow::Error::from)
+        .and_then(|id| Ok(id.object()?.peel_to_commit()?))
+        .with_context(|| {
+            format!(
+                "cannot resolve `{rev}` to a commit; pass a branch, tag, full or abbreviated SHA, \
+                 or an expression such as HEAD~2 (list_refs shows what exists)"
+            )
+        })
+}
+
+/// Resolve `rev` (default `HEAD`) to a tree: commits and tags are peeled.
+pub fn resolve_tree<'repo>(
+    repo: &'repo gix::Repository,
+    rev: Option<&str>,
+) -> anyhow::Result<gix::Tree<'repo>> {
+    let rev = rev.unwrap_or("HEAD");
+    ensure_head_is_born(repo, rev)?;
+    repo.rev_parse_single(rev)
+        .map_err(anyhow::Error::from)
+        .and_then(|id| Ok(id.object()?.peel_to_tree()?))
+        .with_context(|| {
+            format!(
+                "cannot resolve `{rev}` to a tree; pass a commit-ish (branch, tag, SHA, HEAD~2) \
+                 or a tree SHA"
+            )
+        })
+}
+
+/// A fresh repository has a HEAD that names a branch with no commits yet; say so plainly
+/// instead of surfacing a generic "reference not found".
+fn ensure_head_is_born(repo: &gix::Repository, rev: &str) -> anyhow::Result<()> {
+    if !matches!(rev, "HEAD" | "@") {
+        return Ok(());
+    }
+    if let gix::head::Kind::Unborn(name) = repo.head()?.kind {
+        bail!(
+            "HEAD points to `{}`, which has no commits yet; commit something first or pass another revision",
+            name.shorten()
+        );
+    }
+    Ok(())
+}
+
+/// Normalize a caller-supplied repository-relative path: strips `./`, duplicate and trailing `/`,
+/// and rejects absolute paths and `..` so nothing can escape the repository.
+///
+/// The repository root (`""` or `"."`) normalizes to an empty path.
+pub fn repo_path(path: &str) -> anyhow::Result<BString> {
+    if path.starts_with('/') || path.starts_with('\\') {
+        bail!(
+            "path `{path}` is absolute; pass a path relative to the repository root, e.g. `src/main.rs`"
+        );
+    }
+    let mut parts = Vec::new();
+    for part in path.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                bail!("path `{path}` contains `..`; pass a path relative to the repository root")
+            }
+            part => parts.push(part),
+        }
+    }
+    Ok(parts.join("/").into())
+}
+
+/// Like [`repo_path`], but the root itself isn't a valid answer.
+pub fn repo_file_path(path: &str) -> anyhow::Result<BString> {
+    let normalized = repo_path(path)?;
+    if normalized.is_empty() {
+        bail!(
+            "`path` is empty; pass a file path relative to the repository root, e.g. `src/main.rs`"
+        );
+    }
+    Ok(normalized)
+}
+
+/// Caller-supplied pathspecs, passed to gix as-is so magic like `:(exclude)` keeps working.
+/// They're relative to the repository root because the server runs from there (see `RepoHandle::discover`).
+pub fn pathspec_patterns(pathspec: &[String]) -> Vec<BString> {
+    pathspec.iter().map(|p| BString::from(p.as_str())).collect()
+}
+
+/// The tree-entry kind (file, executable, symlink, submodule) an index entry mode stands for.
+pub fn index_entry_kind(mode: gix::index::entry::Mode) -> gix::object::tree::EntryKind {
+    mode.to_tree_entry_mode()
+        .map_or(gix::object::tree::EntryKind::Blob, |m| m.kind())
+}
+
+/// Format an object id abbreviated to git's default seven hex digits.
+pub fn short_hex(id: &gix::oid) -> String {
+    id.to_hex_with_len(7).to_string()
+}
+
 #[cfg(test)]
 pub(crate) mod testutil {
     use std::{path::Path, process::Command};
@@ -48,22 +256,163 @@ pub(crate) mod testutil {
         git(&["commit", "-q", "-am", "second commit\n\nwith a body"]);
         git(&["tag", "v1"]);
         git(&["branch", "feature"]);
-        let repo = gix::open(dir.path()).unwrap();
+        let repo = open(dir.path());
         (dir, repo)
     }
 
+    /// An initialized repository on `main` with no commits.
+    pub fn empty_repo() -> (tempfile::TempDir, gix::Repository) {
+        let dir = tempfile::tempdir().unwrap();
+        run_git(dir.path(), &["init", "-q", "-b", "main"]);
+        let repo = open(dir.path());
+        (dir, repo)
+    }
+
+    /// A bare clone of [`fixture_repo`].
+    pub fn bare_repo() -> (tempfile::TempDir, gix::Repository) {
+        let (src, _) = fixture_repo();
+        let dir = tempfile::tempdir().unwrap();
+        let bare = dir.path().join("bare.git");
+        run_git(
+            dir.path(),
+            &[
+                "clone",
+                "-q",
+                "--bare",
+                src.path().to_str().unwrap(),
+                bare.to_str().unwrap(),
+            ],
+        );
+        let repo = open(&bare);
+        (dir, repo)
+    }
+
+    /// Open with global and system git config ignored, matching the environment `run_git` gives the oracle.
+    pub fn open(path: &Path) -> gix::Repository {
+        gix::open_opts(path, gix::open::Options::isolated()).unwrap()
+    }
+
+    /// Write `content` to `rel` under `root`, creating parent directories.
+    pub fn write(root: &Path, rel: &str, content: impl AsRef<[u8]>) {
+        let path = root.join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, content).unwrap();
+    }
+
+    /// Run git and report whether it succeeded, for commands expected to fail (e.g. a conflicting merge).
+    pub fn try_git(cwd: &Path, args: &[&str]) -> bool {
+        git_command(cwd, args).output().unwrap().status.success()
+    }
+
     pub fn run_git(cwd: &Path, args: &[&str]) {
-        let status = Command::new("git")
-            .args(args)
+        run_git_with_env(cwd, args, &[]);
+    }
+
+    /// Like [`run_git`] with extra environment, e.g. `GIT_COMMITTER_DATE` to pin commit times.
+    pub fn run_git_with_env(cwd: &Path, args: &[&str], env: &[(&str, &str)]) {
+        let out = git_command(cwd, args)
+            .envs(env.iter().copied())
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    /// Run git and return its stdout: the oracle side of a comparison.
+    pub fn git_stdout(cwd: &Path, args: &[&str]) -> String {
+        let out = git_command(cwd, args).output().unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8(out.stdout).unwrap()
+    }
+
+    fn git_command(cwd: &Path, args: &[&str]) -> Command {
+        let mut cmd = Command::new("git");
+        cmd.args(args)
             .current_dir(cwd)
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .env("GIT_CONFIG_NOSYSTEM", "1")
             .env("GIT_AUTHOR_NAME", "Test")
             .env("GIT_AUTHOR_EMAIL", "test@example.com")
             .env("GIT_COMMITTER_NAME", "Test")
-            .env("GIT_COMMITTER_EMAIL", "test@example.com")
-            .status()
-            .unwrap();
-        assert!(status.success(), "git {args:?} failed");
+            .env("GIT_COMMITTER_EMAIL", "test@example.com");
+        cmd
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tools::testutil::{empty_repo, fixture_repo};
+
+    #[test]
+    fn repo_path_normalizes_and_rejects_escapes() {
+        assert_eq!(repo_path("./src//main.rs/").unwrap(), "src/main.rs");
+        assert_eq!(repo_path("").unwrap(), "");
+        assert_eq!(repo_path(".").unwrap(), "");
+        assert!(repo_path("/etc/passwd").is_err());
+        assert!(repo_path("src/../../x").is_err());
+        assert!(repo_file_path("./").is_err());
+    }
+
+    #[test]
+    fn page_limit_and_budget_clamp() {
+        assert_eq!(page_limit(None, 20, 500), 20);
+        assert_eq!(page_limit(Some(0), 20, 500), 1);
+        assert_eq!(page_limit(Some(9999), 20, 500), 500);
+        assert_eq!(byte_budget(None), DEFAULT_MAX_BYTES);
+        assert_eq!(byte_budget(Some(usize::MAX)), MAX_MAX_BYTES);
+    }
+
+    #[test]
+    fn paginate_reports_truncation_at_boundaries() {
+        let items = || (0..5).map(anyhow::Ok);
+        assert_eq!(
+            paginate(items(), 0, 5).unwrap(),
+            (vec![0, 1, 2, 3, 4], false)
+        );
+        assert_eq!(paginate(items(), 0, 4).unwrap(), (vec![0, 1, 2, 3], true));
+        assert_eq!(paginate(items(), 4, 4).unwrap(), (vec![4], false));
+        assert_eq!(paginate(items(), 9, 4).unwrap(), (vec![], false));
+        let failing = [Ok(1), Err(anyhow::anyhow!("boom"))];
+        assert!(
+            paginate(failing, 0, 1).is_err(),
+            "errors just past the page surface"
+        );
+    }
+
+    #[test]
+    fn resolve_commit_explains_failures() {
+        let (_dir, repo) = fixture_repo();
+        assert_eq!(
+            resolve_commit(&repo, Some("v1")).unwrap().id,
+            repo.head_id().unwrap()
+        );
+        let err = format!("{:#}", resolve_commit(&repo, Some("nope")).unwrap_err());
+        assert!(err.contains("cannot resolve `nope`"), "{err}");
+
+        let (_dir, empty) = empty_repo();
+        let err = format!("{:#}", resolve_commit(&empty, None).unwrap_err());
+        assert!(err.contains("no commits yet"), "{err}");
+        assert!(resolve_tree(&empty, None).is_err());
+    }
+
+    #[test]
+    fn typechange_ignores_executable_bit() {
+        use gix::object::tree::EntryKind::*;
+        assert_eq!(
+            ChangeKind::of_modification(Blob, BlobExecutable),
+            ChangeKind::Modified
+        );
+        assert_eq!(
+            ChangeKind::of_modification(Blob, Link),
+            ChangeKind::Typechange
+        );
     }
 }

@@ -3,10 +3,13 @@ use serde::Serialize;
 
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct RepoInfo {
+    /// Absolute path of the `.git` directory (the repository itself when bare).
     pub git_dir: String,
     /// `null` for bare repositories.
     pub workdir: Option<String>,
+    /// True for a repository without a working tree.
     pub is_bare: bool,
+    /// True for a shallow clone, whose history is cut off.
     pub is_shallow: bool,
     /// Short branch name HEAD points to; `null` when detached.
     pub head_branch: Option<String>,

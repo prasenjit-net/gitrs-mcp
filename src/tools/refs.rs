@@ -31,6 +31,7 @@ pub struct RefEntry {
 
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ListRefsResult {
+    /// Matching refs, sorted by full name.
     pub refs: Vec<RefEntry>,
 }
 

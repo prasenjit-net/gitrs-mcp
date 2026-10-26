@@ -9,7 +9,7 @@ RELEASE_BIN := target/release/$(BIN)
 
 .DEFAULT_GOAL := help
 .PHONY: help build release run run-write test test-verbose fmt fmt-check clippy check \
-        smoke inspector install uninstall mcp-add doc deps outdated clean
+        coverage coverage-html smoke inspector install uninstall mcp-add doc deps outdated clean
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -56,6 +56,14 @@ clippy: ## Lint with warnings as errors
 	cargo clippy --all-targets -- -D warnings
 
 check: fmt-check clippy test smoke ## Everything CI should run
+
+COVERAGE_MIN ?= 80
+
+coverage: ## Test coverage summary; fails below COVERAGE_MIN% lines (needs cargo-llvm-cov)
+	cargo llvm-cov --fail-under-lines $(COVERAGE_MIN)
+
+coverage-html: ## Line-by-line HTML coverage report, opened in the browser
+	cargo llvm-cov --html --open
 
 doc: ## Build and open API docs
 	cargo doc --no-deps --open

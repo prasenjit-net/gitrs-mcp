@@ -1,0 +1,225 @@
+# gitrs-mcp roadmap
+
+A local-only Git MCP server in Rust on top of [gitoxide](https://github.com/GitoxideLabs/gitoxide) (`gix` 0.90) and the official MCP SDK (`rmcp` 3.7), speaking MCP over stdio.
+
+## Design principles
+
+1. **Local only, by construction.** `gix` is built without any `*-network-client` / `*-http-transport-*` feature, so fetch, push, clone and ls-remote can't be compiled in. Tools never read remote credentials.
+2. **Read-only by default.** Write tools exist only behind `--allow-write`. Without the flag they aren't registered at all, so the model never sees them (not just "refused at call time").
+3. **Structured, bounded output.** Every tool returns typed JSON (`Json<T>` → `structuredContent` plus `outputSchema`). Every list is paginated (`limit`, `skip`/`cursor`), and every blob or patch has a byte budget with an explicit `truncated: true`. The default output budget is about 64 KiB per call.
+4. **Errors the model can act on.** Bad input (an unknown revision, a path not in the tree, a dirty worktree) comes back as a tool error (`isError: true`) whose message says what to fix. Protocol errors are reserved for real server bugs.
+5. **Git-compatible semantics.** Revisions accept full `git rev-parse` syntax. Results must match the `git` CLI on the same repo. Tests use system `git` as the oracle.
+6. **Destructive operations need two steps.** Anything that can lose data takes `dry_run` (default `true`) and reports exactly what it would change. The real run needs `dry_run: false`.
+
+## Architecture
+
+```
+src/
+├─ main.rs          CLI args (clap), logging to stderr, stdio transport
+├─ server.rs        #[tool_router] — thin async wrappers + ServerHandler metadata
+├─ repo.rs          RepoHandle: ThreadSafeRepository + spawn_blocking bridge
+└─ tools/
+   ├─ mod.rs        shared output types (Signature, …), test fixtures
+   ├─ repo.rs       repo_info
+   ├─ history.rs    log, show_commit
+   └─ refs.rs       list_refs
+```
+
+Conventions for every new tool:
+- **Logic.** A sync `fn(&gix::Repository, Args) -> anyhow::Result<Out>` in `tools/<area>.rs`, with `Args: Deserialize + JsonSchema` and `Out: Serialize + JsonSchema`. Doc comments on the fields become the schema descriptions the model reads.
+- **Wrapper.** A three-line wrapper in `server.rs`, annotated with `read_only_hint`, `destructive_hint` and `idempotent_hint` as applicable.
+- **Tests.** Unit tests in the same file against `testutil::fixture_repo()`. When output must match git, compare against the `git` CLI.
+
+When `server.rs` gets crowded (around Phase 2), split it into one `#[tool_router(router = …)]` block per area and combine them with `+`.
+
+---
+
+## Phase 0: Scaffold ✅ (done)
+
+| Tool | Purpose | gix API |
+|---|---|---|
+| `repo_info` | Paths, HEAD, current branch, bare/shallow, in-progress op | `head_name`, `head_id`, `state`, `is_shallow` |
+| `log` | Paginated history from a revision; `first_parent` option | `rev_walk().first_parent_only()` |
+| `show_commit` | Full metadata and message of one commit | `rev_parse_single`, `peel_to_commit` |
+| `list_refs` | Branches, tags or all refs, with peeled targets and a HEAD marker | `references().local_branches()/tags()/all()` |
+
+Infrastructure is in place: `--repo`, `--allow-write`, tracing to stderr via `GITRS_LOG`, tool-level error mapping, the fixture repo built with system git, and a verified stdio round trip.
+
+---
+
+## Phase 1: Core read (the everyday 80%)
+
+These tools let an agent understand "what's going on in this repo" without shelling out.
+
+### `status`
+- **In:** `pathspec?: string[]`, `include_untracked: bool = true`, `include_ignored: bool = false`.
+- **Out:** `branch`, `head`, `upstream: null` (local-only), `staged[]`, `unstaged[]`, `untracked[]`, `conflicted[]`. Each entry has `{path, change: added|modified|deleted|renamed|typechange, old_path?}`.
+- **gix:** `repo.status(progress)` then `.into_iter()` (index↔worktree and tree↔index). Untracked files come from the `dirwalk` integration.
+- **Tests:** compare with `git status --porcelain=v2` for every change type, including renames and a submodule.
+
+### `diff`
+- **In:** `from?: rev`, `to?: rev`, `staged: bool`, `pathspec?: string[]`, `format: stat|name_status|patch = stat`, `context_lines = 3`, `max_bytes`.
+- **Modes:** worktree↔index (default), index↔HEAD (`staged`), and rev↔rev.
+- **Out:** `files[] {path, old_path?, status, additions, deletions, binary, patch?}`, `totals`, `truncated`.
+- **gix:** `diff_tree_to_tree` with rename tracking, the `status` iterator for the worktree/index sides, `diff_resource_cache` with `gix-imara-diff` for unified hunks.
+- **Tests:** match `git diff --numstat` and `--name-status`. Patch text must apply cleanly with `git apply --check`.
+
+### `read_file`
+- **In:** `path`, `rev = HEAD` (or `"index"` / `"worktree"`), `offset_bytes?`, `max_bytes`.
+- **Out:** `content` (utf-8) or `base64` with `binary: true`, plus `size`, `blob_id`, `truncated`.
+- **gix:** `rev_parse_single("<rev>:<path>")`, then `object().detach()`. Index reads use `index().entry_by_path`.
+
+### `list_tree`
+- **In:** `rev = HEAD`, `path?`, `recursive = false`, `limit`.
+- **Out:** `entries[] {path, kind: blob|tree|commit(submodule)|symlink, mode, id, size?}`.
+- **gix:** `commit.tree()`, then `peel_to_entry_by_path` and `traverse().breadthfirst`.
+
+### `rev_parse`
+- **In:** `spec` (also ranges such as `a..b` and `a...b`).
+- **Out:** `{kind: single|range|merge_base_range, ids[], object_type}`.
+- **gix:** `repo.rev_parse(spec)`, which returns a `revision::Spec`.
+
+### `file_history`
+- **In:** `path`, `rev = HEAD`, `limit`, `follow_renames = false`.
+- **Out:** a list of `LogEntry` plus `change` for the path at each commit.
+- **gix:** walk and tree-diff each commit against its first parent, filtered by path. Rename following comes later, behind a flag.
+
+### `search_commits`
+- **In:** `message_regex?`, `author?`, `since?`, `until?`, `path?`, `rev = HEAD`, `limit`.
+- **gix:** `rev_walk` with the commit-time cutoff `Sorting::ByCommitTimeCutoff` and in-process filtering (`regex` is already pulled in by `revparse-regex`).
+
+### `compare_refs`
+- **In:** `base`, `head`.
+- **Out:** `merge_base`, `ahead`, `behind`, `ahead_commits[]` (capped), `behind_commits[]` (capped).
+- **gix:** `merge_base`, plus a `rev_walk(...).with_hidden(...)` count in each direction.
+
+### `blame`
+- **In:** `path`, `rev = HEAD`, `line_range?: [start, end]`.
+- **Out:** `hunks[] {start_line, lines, commit_id, author, summary, original_path}`.
+- **gix:** `repo.blame_file` (the `blame` feature is already enabled).
+- **Tests:** compare with `git blame --porcelain` on the fixture.
+
+**Exit criteria:** an agent can do "what did I change, why, and where did this line come from" entirely through MCP. Every output is checked against the git CLI.
+
+---
+
+## Phase 2: Deep read and inspection
+
+| Tool | In → Out | gix |
+|---|---|---|
+| `grep` | `pattern` (regex), `rev \| worktree`, `pathspec`, `ignore_case`, `limit` → `matches[] {path, line, text}` | tree traversal + blob read; worktree via `dirwalk` honoring excludes |
+| `describe` | `rev` → `v1.2-3-gabc123` + parts | `commit.describe()` |
+| `show_tag` | `name` → tagger, message, target, kind | `find_reference` then `peel` |
+| `reflog` | `ref = HEAD`, `limit` → entries `{old, new, committer, message}` | `reference.log_iter()` |
+| `list_stashes` | → entries from `refs/stash` reflog | reflog read only; gix has no stash API |
+| `list_worktrees` | → `{path, branch, head, locked, prunable}` | `repo.worktrees()` |
+| `list_submodules` | → `{name, path, url, recorded_commit, checked_out_commit, state}` | `repo.submodules()` |
+| `conflicts` | → during a merge/rebase: `path`, ours/theirs/base blob ids and optional contents | index stages 1–3 via `open_index()` |
+| `check_ignore` | `paths[]` → matching rule and source file | `repo.excludes(...)` |
+| `check_attr` | `paths[]`, `attrs[]` → values | `repo.attributes(...)` |
+| `config_get` | `key` or `section` → values with scope (local/global/system) | `config_snapshot()`, values redacted: `credential.*`, `*.token`, `*password*`, `http.*.extraheader` |
+| `merge_preview` | `ours`, `theirs` → `clean: bool`, `conflicts[] {path, kind}`, resulting tree id | `merge_commits` in memory only. Nothing is written, so it is read-only and safe |
+| `notes` | `rev` → notes text | `repo.notes()` |
+| `count_objects` | → loose/packed counts and sizes, commit-graph present? | odb stats |
+
+**Exit criteria:** code-review and archaeology workflows (“is it safe to merge X into Y?”, “who touches this module?”) work without write access.
+
+---
+
+## Phase 3: Safe writes (behind `--allow-write`)
+
+Shared guarantees for every tool in this phase:
+- **Refusals.** Refuse if `repo.state()` reports an operation in progress (merge, rebase, …), unless the tool is that operation's continuation.
+- **Locking and atomicity.** Use gix lock files (`gix-lock`). Ref updates go through `edit_references` with `PreviousValue::MustExistAndMatch` (compare-and-swap) to avoid races with concurrent human edits.
+- **Output.** Return the new state (new commit id, new index summary) so the agent doesn't need a follow-up `status` call.
+- **Annotations.** `read_only_hint = false`. Set `destructive_hint` where data can be lost.
+
+| Tool | Behaviour | gix | Notes |
+|---|---|---|---|
+| `stage` | `paths[]` / `all` → add to index (adds, modifications, deletions) | build an index from the status iterator, `write_blob`, `index.write()` | respect `.gitattributes` filters (`filter` pipeline) and executable bits |
+| `unstage` | `paths[]` → reset index entries to HEAD | rewrite entries from the HEAD tree | |
+| `commit` | `message`, `amend = false`, `allow_empty = false`, `author?` → new commit | `index.write_tree` + `repo.commit(...)` / `commit_as` | **gap:** hooks (`pre-commit`, `commit-msg`) and signing aren't run by gix. Either document this or optionally shell out to the hooks (opt-in `--run-hooks`) |
+| `create_branch` | `name`, `start_point = HEAD`, `force = false` | `edit_reference` with `MustNotExist` | name validated by `gix-validate` |
+| `delete_branch` | `name`, `force = false`; non-force refuses unmerged branches | `delete_local_branches_if_unchanged` | `destructive_hint`, `dry_run` default |
+| `rename_branch` | `old`, `new` | two ref edits + reflog move | |
+| `create_tag` | `name`, `target`, `message?` (annotated if set) | `repo.tag(...)` / `tag_reference` | |
+| `switch` | `branch` or `rev` (detached), `create?` | update HEAD, then check out the tree with `checkout_options` + `gix-worktree-state` | refuse if the worktree has changes that would be overwritten (compute via status ∩ changed paths) |
+| `restore` | `paths[]`, `source = index \| HEAD \| rev`, `staged` | per-file checkout | `destructive_hint`, `dry_run` default |
+| `reset` | `mode: soft \| mixed` (no `hard` in this phase), `rev` | move the branch ref, rebuild the index for `mixed` | `hard` waits until Phase 4 with `dry_run` |
+
+**Exit criteria:** an agent can run the full local edit, stage, commit and branch loop. Every write tool has a test proving it refuses on a dirty or conflicting state and leaves the repo unchanged on refusal.
+
+---
+
+## Phase 4: History rewriting and multi-step operations
+
+gix has no sequencer, so this phase is where we build our own logic on its primitives.
+
+| Tool | Approach |
+|---|---|
+| `merge` | `merge_commits` → if clean, write the tree, create a merge commit, check out. If there are conflicts, write conflict stages to the index plus markers in the worktree and set `MERGE_HEAD`. Then `merge_continue` / `merge_abort` |
+| `cherry_pick` / `revert` | `merge_trees(base=parent, ours=HEAD, theirs=commit)` per commit (inverted for revert). Write `CHERRY_PICK_HEAD` on conflict |
+| `rebase` | Our own minimal sequencer: a list of picks in `.git/rebase-merge` (git-compatible layout, so `git rebase --continue` still works). Supports `onto`, `continue`, `abort` and `skip`. No interactive editor: `todo` comes in as a structured list (`pick`/`drop`/`squash`/`reword` with message) |
+| `stash_push` / `stash_pop` / `stash_drop` | Implement git's stash commit layout (worktree commit with index and untracked parents) on `commit`/`write_tree`. **gap:** no gix support |
+| `reset` mode `hard` | With `dry_run`, it lists files that would lose changes |
+| `worktree_add` / `worktree_remove` | `.git/worktrees/<name>` layout and checkout |
+| `clean` | `dirwalk` untracked/ignored → `dry_run` lists them by default |
+
+**Exit criteria:** each operation leaves on-disk state that real `git` can continue or abort. Test this by interleaving gitrs-mcp and git CLI steps.
+
+---
+
+## Phase 5: MCP-native extras
+
+- **Resources.**
+  - `gitrs://commit/{id}`, `gitrs://file/{rev}/{path}`, `gitrs://diff/{from}..{to}`, so clients can attach repo content as context.
+  - Resource templates plus `completion` for revs and paths.
+- **Prompts.**
+  - `write_commit_message`: fills in the staged diff.
+  - `review_changes`: diff plus surrounding blame.
+  - `explain_history`: file history for a path.
+- **Progress notifications** for long operations (`blame` on big files, `grep`, large `log`). Honour cancellation via `gix::interrupt` / `should_interrupt` flags.
+- **Change notifications.** Watch `.git/HEAD`, refs and the index, and emit `notifications/resources/updated`. This is optional behind `--watch`.
+- **Multi-repo.**
+  - Accept multiple `--repo` values, or use MCP `roots` from the client.
+  - Every tool gets an optional `repo` param. Refuse paths outside the declared roots.
+- **Caching.** Keep a per-process object cache (`object_cache_size_if_unset`) and reuse the commit-graph. Benchmark `log` and `blame` against git on git.git itself.
+
+---
+
+## Phase 6: Hardening and release
+
+- **Security review.**
+  - Paths: no `..` escapes, no following symlinks out of the worktree, and `core.worktree` overrides honoured safely.
+  - Ownership checks: gix's `git_dir_trust`, the equivalent of git's `safe.directory`.
+  - Redaction: config values with secrets are redacted.
+- **Fuzzing** of argument parsing and revspecs (`cargo fuzz`), plus large-repo stress tests (git.git, linux.git).
+- **Integration tests** through a real MCP client (`rmcp` `client` + `transport-child-process` features) that spawns the binary.
+- **Distribution.**
+  - `cargo install gitrs-mcp`, prebuilt binaries via `cargo-dist`, a Homebrew tap.
+  - Docs with copy-paste client config for Claude Code (`claude mcp add gitrs -- gitrs-mcp --repo .`), Claude Desktop, VS Code and Cursor.
+- **Versioning.** Tool names and schemas are a public API. Use semver: add fields freely, and never rename or remove fields within a major version.
+
+---
+
+## Known gix gaps (as of 0.90) and plan
+
+| Missing in gix | Impact | Plan |
+|---|---|---|
+| Stash | `stash_*` tools | Implement the stash commit format ourselves (Phase 4). Reading `refs/stash` works today |
+| Sequencer (rebase, cherry-pick, revert state machine) | Phase 4 | Own minimal sequencer on `merge_trees`, writing git-compatible state files |
+| Hooks | `commit` skips `pre-commit`/`commit-msg` | Document it. Optional `--run-hooks` executes them as subprocesses |
+| Commit/tag signing | Signed commits | Out of scope at first. Maybe shell out to `gpg`/`ssh-keygen -Y sign` later |
+| Network | n/a | Intentionally excluded |
+
+## Milestone summary
+
+| Phase | Tools | Rough size |
+|---|---|---|
+| 0 Scaffold | 4 | done |
+| 1 Core read | 9 | ~2–3k LOC + tests |
+| 2 Deep read | 14 | ~2k LOC |
+| 3 Safe writes | 10 | ~2–3k LOC (index writing and checkout safety are the hard parts) |
+| 4 Rewriting | 8 | ~3–4k LOC (sequencer and stash) |
+| 5 MCP extras | resources, prompts, progress, multi-repo | ~1.5k LOC |
+| 6 Hardening | — | ongoing |

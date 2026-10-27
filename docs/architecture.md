@@ -10,7 +10,7 @@ src/
 ├─ server/          MCP surface: server metadata (mod.rs) and one #[tool_router] per area
 │  ├─ repo.rs       repository, refs, tags, reflogs and revisions
 │  ├─ changes.rs    working tree and index
-│  ├─ files.rs      file contents, search and blame
+│  ├─ files.rs      file contents, search, ignore and attribute rules, blame
 │  ├─ history.rs    commit history and notes
 │  └─ setup.rs      worktrees, submodules, config and object storage
 ├─ repo.rs          RepoHandle: opens the repository, runs gix calls on the blocking pool
@@ -25,6 +25,7 @@ src/
    ├─ diff.rs       diff, plus the tree/index comparison that status reuses
    ├─ files.rs      read_file, list_tree
    ├─ grep.rs       grep
+   ├─ attributes.rs check_ignore, check_attr
    ├─ blame.rs      blame
    ├─ worktrees.rs  list_worktrees
    ├─ submodules.rs list_submodules

@@ -10,7 +10,7 @@ It lets AI assistants inspect a Git repository through typed tools with structur
 - **Structured output.** Every tool returns JSON with a published output schema. Bad input, such as an unknown revision, comes back as a tool error the model can read and correct.
 - **Pure Rust.** It runs as a single static binary that speaks MCP over stdio, and it doesn't need `libgit2` or the `git` executable.
 
-> **Status:** early development. Phases 0 and 1 of the [roadmap](ROADMAP.md) are done, and Phase 2 is under way: 23 read-only tools covering status, diffs, file contents, code search, history, blame, refs, tags, reflogs, stashes, notes, worktrees, submodules, config and object stats. Write tools come in Phase 3.
+> **Status:** early development. Phases 0 and 1 of the [roadmap](ROADMAP.md) are done, and Phase 2 is under way: 25 read-only tools covering status, diffs, file contents, code search, ignore and attribute rules, history, blame, refs, tags, reflogs, stashes, notes, worktrees, submodules, config and object stats. Write tools come in Phase 3.
 
 ## Install
 
@@ -74,6 +74,8 @@ Revision arguments accept anything `git rev-parse` does: SHAs and SHA prefixes, 
 | `read_file` | `path`, `rev?` (default `HEAD`; or `index`, `worktree`), `offset_bytes?`, `max_bytes?` | File content as UTF-8 or base64, with size, mode, blob id, and `next_offset` for chunked reads |
 | `list_tree` | `rev?`, `path?`, `recursive?`, `limit?`, `skip?` | Tree entries (path, kind, mode, id, size) in `git ls-tree` order |
 | `blame` | `path`, `rev?`, `line_range?`, `limit?` | Hunks of lines with the commit, author and summary that last changed them, following renames |
+| `check_ignore` | `paths` | Per path: ignored or not, tracked, and the deciding rule with its file and line |
+| `check_attr` | `paths`, `attrs?` (default: all set attributes) | Per path: attribute states (`set`, `unset`, a value, `unspecified`) from `.gitattributes` |
 | `grep` | `pattern`, `rev?` (default `worktree`; or `index`, a revision), `pathspec?`, `ignore_case?`, `fixed_strings?`, `limit?`, `skip?` | Matching lines (path, line, column, text) in tracked files, like `git grep` |
 | `log` | `rev?` (default `HEAD`), `limit?` (default 20, max 500), `skip?`, `first_parent?` | Commits newest first (id, short id, summary, author, parents) |
 | `show_commit` | `rev?` (default `HEAD`) | Full commit: tree, parents, author, committer, summary, full message |
@@ -93,7 +95,7 @@ Revision arguments accept anything `git rev-parse` does: SHAs and SHA prefixes, 
 | `config_get` | `key?` or `section?`, `scope?`, `limit?`, `skip?` | Config values with scope and file; credentials, tokens, passwords and auth headers redacted |
 | `count_objects` | none | Loose and packed object counts and sizes, packs, commit-graph and multi-pack-index presence |
 
-The full reference, with every argument, result field, error and a real example per tool, is in [docs/tools.md](docs/tools.md). The rest of Phase 2 adds merge previews, conflict inspection, and ignore and attribute checks; Phase 3 adds safe write tools behind `--allow-write`. See [ROADMAP.md](ROADMAP.md).
+The full reference, with every argument, result field, error and a real example per tool, is in [docs/tools.md](docs/tools.md). The rest of Phase 2 adds merge previews and conflict inspection; Phase 3 adds safe write tools behind `--allow-write`. See [ROADMAP.md](ROADMAP.md).
 
 ## Documentation
 
@@ -135,6 +137,7 @@ src/
    ├─ diff.rs       diff
    ├─ files.rs      read_file, list_tree
    ├─ grep.rs       grep
+   ├─ attributes.rs check_ignore, check_attr
    ├─ blame.rs      blame
    ├─ worktrees.rs  list_worktrees
    ├─ submodules.rs list_submodules

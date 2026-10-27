@@ -1,12 +1,12 @@
 # Tool reference
 
-gitrs-mcp exposes 23 read-only tools. This page covers each one: what it does, its arguments and defaults, the fields it returns, the errors it reports, and a real request and response.
+gitrs-mcp exposes 25 read-only tools. This page covers each one: what it does, its arguments and defaults, the fields it returns, the errors it reports, and a real request and response.
 
 - [Conventions](#conventions)
 - [Shared types](#shared-types)
 - Repository and refs: [`repo_info`](#repo_info), [`list_refs`](#list_refs), [`rev_parse`](#rev_parse), [`compare_refs`](#compare_refs), [`describe`](#describe), [`show_tag`](#show_tag), [`reflog`](#reflog), [`list_stashes`](#list_stashes)
 - Local changes: [`status`](#status), [`diff`](#diff)
-- Files: [`read_file`](#read_file), [`list_tree`](#list_tree), [`blame`](#blame), [`grep`](#grep)
+- Files: [`read_file`](#read_file), [`list_tree`](#list_tree), [`blame`](#blame), [`grep`](#grep), [`check_ignore`](#check_ignore), [`check_attr`](#check_attr)
 - History: [`log`](#log), [`show_commit`](#show_commit), [`file_history`](#file_history), [`search_commits`](#search_commits), [`notes`](#notes)
 - Repository setup: [`list_worktrees`](#list_worktrees), [`list_submodules`](#list_submodules), [`config_get`](#config_get), [`count_objects`](#count_objects)
 
@@ -859,6 +859,117 @@ An invalid regex:
     greet(
          ^
 error: unclosed group
+```
+
+## `check_ignore`
+
+Whether paths are ignored, and by which rule, like `git check-ignore -v --non-matching`. Rules come from `.gitignore` files in the worktree (or the index), `.git/info/exclude`, and `core.excludesFile`. The paths don't have to exist.
+
+As in git, a path inside an ignored directory is ignored by that directory's rule, and no rule further down can re-include it. Tracked files are never ignored, whatever the rules say; `pattern` still shows the rule that would apply (`git check-ignore --no-index`).
+
+**Arguments**
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `paths` | string[] | required | Paths relative to the repository root, at most 1000. A path that exists as a directory, or ends with `/`, is checked as a directory. |
+
+**Result**
+
+| Field | Type | Description |
+|---|---|---|
+| `paths[]` | array | One answer per requested path, in request order. |
+| `paths[].path` | string | The path as checked (a trailing `/` is kept). |
+| `paths[].ignored` | boolean | True when git ignores the path: a rule matches it or a parent directory, the rule isn't a `!` negation, and the path isn't tracked. |
+| `paths[].tracked` | boolean | True when the path is in the index. |
+| `paths[].pattern` | string \| null | The deciding rule as written, e.g. `*.log`, `target/` or `!keep.log`; `null` when no rule matches. |
+| `paths[].source` | string \| null | File the rule comes from, relative to the repository root when inside it (`.gitignore`, `src/.gitignore`, `.git/info/exclude`), otherwise absolute. |
+| `paths[].line` | integer \| null | 1-based line of the rule in `source`. |
+
+**Errors:** an empty `paths`, more than 1000 paths, or a path that is absolute or contains `..`.
+
+**Example**
+
+```json
+{"paths": ["target/debug/app", "server.log", "src/lib.rs", "notes.txt"]}
+```
+
+```json
+{
+  "paths": [
+    {"ignored": true, "line": 1, "path": "target/debug/app", "pattern": "target/", "source": ".gitignore", "tracked": false},
+    {"ignored": true, "line": 2, "path": "server.log", "pattern": "*.log", "source": ".gitignore", "tracked": false},
+    {"ignored": false, "line": null, "path": "src/lib.rs", "pattern": null, "source": null, "tracked": true},
+    {"ignored": false, "line": null, "path": "notes.txt", "pattern": null, "source": null, "tracked": false}
+  ]
+}
+```
+
+## `check_attr`
+
+Git attributes of paths, like `git check-attr`. Attributes come from `.gitattributes` files, `.git/info/attributes` and `core.attributesFile`, and decide how git treats a file: line endings (`text`, `eol`), `binary`, diff and merge drivers, `export-ignore`, `linguist-*` and so on. The paths don't have to exist.
+
+**Arguments**
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `paths` | string[] | required | Paths relative to the repository root, at most 1000. |
+| `attrs` | string[] | `[]` | Attribute names to look up, e.g. `["text", "diff"]`. Empty means every attribute set on each path, like `git check-attr -a`. |
+
+**Result**
+
+| Field | Type | Description |
+|---|---|---|
+| `paths[]` | array | One answer per requested path, in request order. |
+| `paths[].path` | string | The path as checked. |
+| `paths[].attributes[]` | array | The requested attributes in request order; with `attrs` empty, every attribute that is set, unset or has a value. Macros expand, so `binary` also reports `diff`, `merge` and `text` as unset. With `attrs` empty the order can differ from git's, which lists macros first. |
+| `paths[].attributes[].name` | string | Attribute name. |
+| `paths[].attributes[].state` | `set` \| `unset` \| `value` \| `unspecified` | `set` (`text`), `unset` (`-text`), `value` (`diff=rust`), or `unspecified` when no rule mentions it; `unspecified` only appears for attributes named in `attrs`. |
+| `paths[].attributes[].value` | string \| null | The value when `state` is `value`. |
+
+In a bare repository only `.git/info/attributes` and `core.attributesFile` apply, because there is no worktree or index to read `.gitattributes` from.
+
+**Errors:** an empty `paths`, more than 1000 paths, or a path that is absolute or contains `..`.
+
+**Examples**
+
+```json
+{"paths": ["src/lib.rs", "logo.png"]}
+```
+
+```json
+{
+  "paths": [
+    {"attributes": [{"name": "diff", "state": "value", "value": "rust"}], "path": "src/lib.rs"},
+    {
+      "attributes": [
+        {"name": "binary", "state": "set", "value": null},
+        {"name": "diff", "state": "unset", "value": null},
+        {"name": "merge", "state": "unset", "value": null},
+        {"name": "text", "state": "unset", "value": null}
+      ],
+      "path": "logo.png"
+    }
+  ]
+}
+```
+
+```json
+{"paths": ["src/lib.rs", "README.md"], "attrs": ["diff", "text"]}
+```
+
+```json
+{
+  "paths": [
+    {
+      "attributes": [{"name": "diff", "state": "value", "value": "rust"}, {"name": "text", "state": "unspecified", "value": null}],
+      "path": "src/lib.rs"
+    },
+    {
+      "attributes": [{"name": "diff", "state": "unspecified", "value": null}, {"name": "text", "state": "unspecified", "value": null}],
+      "path": "README.md"
+    }
+  ]
+}
 ```
 
 ## `log`

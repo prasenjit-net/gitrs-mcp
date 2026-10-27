@@ -4,6 +4,7 @@
 //! Shared output types and argument helpers (rev defaults, pagination, byte
 //! budgets, path normalization) live here so every tool behaves the same way.
 
+pub mod attributes;
 pub mod blame;
 pub mod config;
 pub mod diff;
@@ -421,6 +422,20 @@ pub(crate) mod testutil {
             String::from_utf8_lossy(&out.stderr)
         );
         String::from_utf8(out.stdout).unwrap()
+    }
+
+    /// Run git with `input` on stdin and return its output without checking the exit status, for
+    /// oracles such as `git grep` and `git check-ignore` that exit 1 when nothing matches.
+    pub fn git_output(cwd: &Path, args: &[&str], input: &[u8]) -> std::process::Output {
+        use std::{io::Write as _, process::Stdio};
+        let mut child = git_command(cwd, args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child.stdin.take().unwrap().write_all(input).unwrap();
+        child.wait_with_output().unwrap()
     }
 
     fn git_command(cwd: &Path, args: &[&str]) -> Command {

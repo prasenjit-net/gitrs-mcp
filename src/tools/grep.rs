@@ -244,7 +244,7 @@ fn read_tracked_file(repo: &gix::Repository, path: &BStr) -> anyhow::Result<Opti
 mod tests {
     use super::*;
     use crate::tools::testutil::{
-        bare_repo, empty_repo, fixture_repo, git_stdout, open, run_git, write,
+        bare_repo, empty_repo, fixture_repo, git_output, git_stdout, open, run_git, write,
     };
 
     fn args(pattern: &str, rev: Option<&str>) -> GrepArgs {
@@ -272,13 +272,7 @@ mod tests {
             "--no-color",
         ];
         cmd.extend_from_slice(extra);
-        let out = std::process::Command::new("git")
-            .args(&cmd)
-            .current_dir(dir)
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_NOSYSTEM", "1")
-            .output()
-            .unwrap();
+        let out = git_output(dir, &cmd, b"");
         // git grep exits 1 when nothing matches.
         assert!(out.status.code().unwrap() <= 1, "git grep {extra:?} failed");
         String::from_utf8(out.stdout)

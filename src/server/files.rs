@@ -66,4 +66,32 @@ impl GitServer {
             .await
             .map(Json)
     }
+
+    /// Whether paths are ignored, and by which rule, like `git check-ignore -v`: the pattern, the file
+    /// it's in (`.gitignore`, `.git/info/exclude`, ...) and its line. Paths don't have to exist.
+    /// Tracked files are reported as not ignored, as git treats them. Up to 1000 paths per call.
+    #[tool(annotations(title = "Check ignore", read_only_hint = true))]
+    async fn check_ignore(
+        &self,
+        Parameters(args): Parameters<tools::attributes::CheckIgnoreArgs>,
+    ) -> Result<Json<tools::attributes::CheckIgnoreResult>, String> {
+        self.repo
+            .run(move |r| tools::attributes::check_ignore(r, args))
+            .await
+            .map(Json)
+    }
+
+    /// Git attributes of paths, like `git check-attr`: the named `attrs` (set, unset, a value, or
+    /// unspecified), or every attribute set on each path when `attrs` is empty. Use it to see how git
+    /// treats a file: `text`/`eol` line endings, `binary`, `diff` drivers, `linguist-*`. Up to 1000 paths.
+    #[tool(annotations(title = "Check attributes", read_only_hint = true))]
+    async fn check_attr(
+        &self,
+        Parameters(args): Parameters<tools::attributes::CheckAttrArgs>,
+    ) -> Result<Json<tools::attributes::CheckAttrResult>, String> {
+        self.repo
+            .run(move |r| tools::attributes::check_attr(r, args))
+            .await
+            .map(Json)
+    }
 }

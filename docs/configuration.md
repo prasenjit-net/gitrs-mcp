@@ -34,7 +34,8 @@ The server reads the repository's git configuration (local, global and system) t
 | `status.showUntrackedFiles` | Whether `status` collapses untracked directories (`normal`, the default) or lists every file (`all`). |
 | `diff.algorithm` | The line-diff algorithm for `diff` and `blame`. |
 | `core.autocrlf`, `.gitattributes` filters | How working-tree files are converted before `diff` compares them with the index, as `git diff` does. |
-| `.gitignore`, `core.excludesFile` | What `status` treats as ignored. |
+| `.gitignore`, `.git/info/exclude`, `core.excludesFile` | What `status` treats as ignored, and the rules `check_ignore` reports. |
+| `.gitattributes`, `.git/info/attributes`, `core.attributesFile` | What `check_attr` reports. |
 | `branch.<name>.remote` / `.merge`, `remote.<name>.fetch` | The `upstream` reported by `status`. |
 | `core.notesRef`, `notes.displayRef` | Which notes refs `notes` reads when no `ref` is given. |
 | `submodule.<name>.url` / `.branch` in `.git/config` | Override `.gitmodules` in `list_submodules`. |

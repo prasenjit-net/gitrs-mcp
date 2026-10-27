@@ -269,10 +269,7 @@ fn apply_stage(
     workdir: &Path,
     updates: BTreeMap<BString, Update>,
 ) -> anyhow::Result<Vec<IndexChange>> {
-    let filemode = repo
-        .config_snapshot()
-        .boolean("core.fileMode")
-        .unwrap_or(true);
+    let filemode = filemode(repo);
     let (mut pipeline, _) = repo.filter_pipeline(None)?;
     let mut changed = Vec::new();
     let mut replacements = Vec::new();
@@ -319,10 +316,10 @@ fn apply_stage(
 }
 
 /// A path and the stage-0 entry that replaces all of its index entries; `None` drops them.
-type Replacement = (BString, Option<(ObjectId, Mode, Stat)>);
+pub type Replacement = (BString, Option<(ObjectId, Mode, Stat)>);
 
 /// Apply `replacements` in one pass over the index, however many paths change.
-fn replace_entries(index: &mut gix::index::State, replacements: Vec<Replacement>) {
+pub fn replace_entries(index: &mut gix::index::State, replacements: Vec<Replacement>) {
     let gone: std::collections::HashSet<&BStr> = replacements
         .iter()
         .map(|(path, _)| path.as_bstr())
@@ -337,7 +334,7 @@ fn replace_entries(index: &mut gix::index::State, replacements: Vec<Replacement>
 
 /// Hash the file at `path` into a blob as git would store it: clean filters and line-ending
 /// conversion from `.gitattributes` applied, symlinks stored as their target. `None` when it's gone.
-fn worktree_blob(
+pub fn worktree_blob(
     repo: &gix::Repository,
     pipeline: &mut gix::filter::Pipeline<'_>,
     index: &gix::index::State,
@@ -380,6 +377,13 @@ fn worktree_blob(
     Ok(Some((id, mode, stat)))
 }
 
+/// Whether the filesystem's executable bit counts (`core.fileMode`, default true).
+pub fn filemode(repo: &gix::Repository) -> bool {
+    repo.config_snapshot()
+        .boolean("core.fileMode")
+        .unwrap_or(true)
+}
+
 /// The executable bit comes from disk unless `core.fileMode` is off, in which case the index keeps
 /// what it had, as git does on filesystems without reliable permissions.
 fn file_mode(meta: &std::fs::Metadata, previous: Option<Mode>, filemode: bool) -> Mode {
@@ -407,6 +411,26 @@ fn is_executable(_meta: &std::fs::Metadata) -> bool {
     false
 }
 
+/// A file version as the index records it: blob id (or a submodule's commit) and mode.
+pub type Version = (ObjectId, Mode);
+
+/// Every file, symlink and submodule in `tree`, by path.
+pub fn tree_versions(
+    repo: &gix::Repository,
+    tree: ObjectId,
+) -> anyhow::Result<BTreeMap<BString, Version>> {
+    let mut recorder = gix::traverse::tree::Recorder::default();
+    repo.find_tree(tree)?
+        .traverse()
+        .breadthfirst(&mut recorder)?;
+    Ok(recorder
+        .records
+        .into_iter()
+        .filter(|record| !record.mode.is_tree())
+        .map(|record| (record.filepath, (record.oid, record.mode.into())))
+        .collect())
+}
+
 /// Point every index entry matching `paths` (everything when empty) back at `tree`'s version,
 /// dropping entries `tree` doesn't have. Returns the staged changes that were undone.
 pub fn reset_entries(
@@ -420,16 +444,8 @@ pub fn reset_entries(
         spec.as_mut()
             .is_none_or(|s| s.is_included(path, Some(false)))
     };
-    let mut wanted: BTreeMap<BString, (ObjectId, Mode)> = BTreeMap::new();
-    let mut recorder = gix::traverse::tree::Recorder::default();
-    repo.find_tree(tree)?
-        .traverse()
-        .breadthfirst(&mut recorder)?;
-    for record in recorder.records {
-        if !record.mode.is_tree() && included(record.filepath.as_ref()) {
-            wanted.insert(record.filepath, (record.oid, record.mode.into()));
-        }
-    }
+    let mut wanted = tree_versions(repo, tree)?;
+    wanted.retain(|path, _| included(path.as_bstr()));
     let mut current: BTreeMap<BString, (ObjectId, Mode, bool)> = BTreeMap::new();
     for entry in index.entries() {
         let path = entry.path(index);

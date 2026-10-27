@@ -7,6 +7,7 @@
 pub mod attributes;
 pub mod blame;
 pub mod branches;
+pub mod checkout;
 pub mod commit;
 pub mod config;
 pub mod diff;
@@ -450,6 +451,26 @@ pub(crate) mod testutil {
             .into_iter()
             .collect();
         assert!(changed.is_empty(), "these files changed: {changed:#?}");
+    }
+
+    /// The working tree's files below `root` (outside `.git`), by relative path, with their content
+    /// (symlinks by target) and whether they're executable, to compare two checkouts.
+    pub fn worktree_files(
+        root: &Path,
+    ) -> std::collections::BTreeMap<std::path::PathBuf, (Vec<u8>, bool)> {
+        use std::os::unix::fs::PermissionsExt;
+        snapshot(root)
+            .into_iter()
+            .filter_map(|(path, content)| {
+                let rela = path.strip_prefix(root).ok()?.to_owned();
+                if rela.starts_with(".git") {
+                    return None;
+                }
+                let meta = std::fs::symlink_metadata(&path).ok()?;
+                let executable = !meta.is_symlink() && meta.permissions().mode() & 0o111 != 0;
+                Some((rela, (content, executable)))
+            })
+            .collect()
     }
 
     /// Two identical fixture repositories after `setup`, so one can be changed with gitrs and the

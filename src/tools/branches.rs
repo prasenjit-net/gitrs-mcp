@@ -15,7 +15,8 @@ use super::{
     refs::{ShowTagArgs, ShowTagResult, show_tag},
     resolve_commit, resolve_object,
     write::{
-        branch_ref, checked_out_at, clean_message, committer, ensure_idle, refuse_signing, tag_ref,
+        branch_ref, checked_out_at, clean_message, committer, ensure_idle, log_head_move,
+        refuse_signing, tag_ref,
     },
 };
 
@@ -287,6 +288,9 @@ pub fn rename_branch(
             std::fs::remove_file(path).ok();
         }
         return Err(err.into());
+    }
+    if head_updated {
+        log_head_move(repo, Some(target), target, &message)?;
     }
     rename_branch_config(repo, &old_short, &new_short).with_context(|| {
         format!(
@@ -634,6 +638,11 @@ mod tests {
         assert_eq!(
             git_stdout(root, &["symbolic-ref", "HEAD"]).trim(),
             "refs/heads/trunk"
+        );
+        let head_log = git_stdout(root, &["reflog", "show", "-1", "--format=%gs", "HEAD"]);
+        assert_eq!(
+            head_log.trim(),
+            "Branch: renamed refs/heads/main to refs/heads/trunk"
         );
         assert!(!exists(root, "refs/heads/main"));
         let new_log = git_stdout(root, &["reflog", "show", "--format=%H %gs", "trunk"]);

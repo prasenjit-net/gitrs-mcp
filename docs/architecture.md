@@ -34,6 +34,7 @@ src/
    ├─ branches.rs   create_branch, delete_branch, rename_branch, create_tag
    ├─ staging.rs    stage, unstage
    ├─ commit.rs     commit, reset
+   ├─ checkout.rs   restore, switch: working-tree writes
    ├─ submodules.rs list_submodules
    ├─ config.rs     config_get, plus the secret redaction submodule URLs share
    ├─ objects.rs    count_objects
@@ -103,7 +104,8 @@ Results are meant to match the `git` CLI on the same repository, and the tests c
   - updates refs as compare-and-swap edits (`PreviousValue::MustExistAndMatch` / `MustNotExist`) under git's lock files, with git's reflog messages;
   - defaults to `dry_run: true` when it can lose data, and is annotated with `destructiveHint` then;
   - needs a committer identity from git config and refuses without one, rather than inventing it, and refuses to create unsigned commits or annotated tags when `commit.gpgSign` / `tag.gpgSign` asks for signatures;
-  - edits the index through `tools::write::update_index`, which takes `.git/index.lock` before reading (so a concurrent `git add` isn't lost), applies the edit, and writes the index back without the cache-tree, untracked-cache and fsmonitor extensions, which would be stale and which git rebuilds. A split index is merged with its shared index when read and written back whole; a sparse index is refused. When `stage` hashes files it runs the same clean filters and line-ending conversion as `git add`.
+  - edits the index through `tools::write::update_index`, which takes `.git/index.lock` before reading (so a concurrent `git add` isn't lost), applies the edit, and writes the index back without the cache-tree, untracked-cache and fsmonitor extensions, which would be stale and which git rebuilds. A split index is merged with its shared index when read and written back whole; a sparse index is refused. When `stage` hashes files it runs the same clean filters and line-ending conversion as `git add`;
+  - writes working-tree files (`restore`, `switch`) through gix's checkout, with smudge filters, line endings, symlinks and the executable bit as `git checkout` writes them, after hashing the current files in an in-memory object store to check that nothing local would be overwritten. `switch` applies git's two-way rule: a path that differs between the two commits must be clean in the index and working tree, and no untracked file may be in the way. Paths whose nearest existing directory leads outside the working tree through a symlink are never written.
 - **Filesystem reads stay inside the repository.** Reads from the working tree (`read_file` with `rev: "worktree"`, and `grep`, which skips such paths) refuse anything under `.git/` and any path whose parent directory resolves outside the repository through a symlink. A symlink itself is reported by its target, as git stores it, and never followed.
 - **Secrets stay out of output.** `config_get` and `list_submodules` replace values that may be secrets with `<redacted>`: anything under `credential`, keys named like a password, token or secret, `http.extraHeader`, and the password in any URL. Configuration that gix derives from environment variables isn't listed at all, as in `git config --list`.
 - **Bounded output.** Every list is paginated and every content field has a byte budget, so a single call can't flood the client's context.

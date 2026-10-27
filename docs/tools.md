@@ -1,6 +1,6 @@
 # Tool reference
 
-gitrs-mcp exposes 27 read-only tools, plus 8 write tools that are only available when the server runs with `--allow-write`. This page covers each one: what it does, its arguments and defaults, the fields it returns, the errors it reports, and a real request and response.
+gitrs-mcp exposes 27 read-only tools, plus 10 write tools that are only available when the server runs with `--allow-write`. This page covers each one: what it does, its arguments and defaults, the fields it returns, the errors it reports, and a real request and response.
 
 - [Conventions](#conventions)
 - [Shared types](#shared-types)
@@ -9,7 +9,7 @@ gitrs-mcp exposes 27 read-only tools, plus 8 write tools that are only available
 - Files: [`read_file`](#read_file), [`list_tree`](#list_tree), [`blame`](#blame), [`grep`](#grep), [`check_ignore`](#check_ignore), [`check_attr`](#check_attr)
 - History: [`log`](#log), [`show_commit`](#show_commit), [`file_history`](#file_history), [`search_commits`](#search_commits), [`notes`](#notes)
 - Repository setup: [`list_worktrees`](#list_worktrees), [`list_submodules`](#list_submodules), [`config_get`](#config_get), [`count_objects`](#count_objects)
-- [Write tools](#write-tools) (only with `--allow-write`): [`create_branch`](#create_branch), [`delete_branch`](#delete_branch), [`rename_branch`](#rename_branch), [`create_tag`](#create_tag), [`stage`](#stage), [`unstage`](#unstage), [`commit`](#commit), [`reset`](#reset)
+- [Write tools](#write-tools) (only with `--allow-write`): [`create_branch`](#create_branch), [`delete_branch`](#delete_branch), [`rename_branch`](#rename_branch), [`create_tag`](#create_tag), [`stage`](#stage), [`unstage`](#unstage), [`commit`](#commit), [`reset`](#reset), [`restore`](#restore), [`switch`](#switch)
 
 ## Conventions
 
@@ -1613,7 +1613,7 @@ These tools change the repository. They are only registered when the server is s
 
 - **Check first, then write.** Every check runs before anything is written, so a refused call leaves the repository byte for byte as it was. The tests prove this for each tool.
 - **No surprises with in-progress operations.** Tools that move HEAD, rewrite the index or touch the working tree refuse while a merge, rebase, cherry-pick, revert or bisect is in progress. Creating branches and tags is still allowed then, as in git.
-- **Destructive tools default to a dry run.** A tool that can lose data, such as `delete_branch`, takes `dry_run` (default `true`) and runs every check without changing anything. Pass `dry_run: false` to act.
+- **Destructive tools default to a dry run.** A tool that can lose data (`delete_branch`, `restore`) takes `dry_run` (default `true`) and runs every check without changing anything. Pass `dry_run: false` to act.
 - **Ref updates are compare-and-swap.** Each ref is updated only if it still points where the tool saw it, under git's lock files, so a concurrent `git` command can't be overwritten silently. Reflog entries use the same messages git writes.
 - **An identity is required.** Commits, tags and reflog entries record a committer from `user.name` and `user.email` in the git config (or the `GIT_COMMITTER_*` environment variables). Without one, the call is refused with instructions.
 - **The index is written like git writes it.** Index edits take `.git/index.lock` before reading the index, so a concurrent `git add` can't be lost, and write it back without the cache-tree, untracked-cache and fsmonitor extensions, which git rebuilds. A split index is written back as a regular one, with every entry; repositories using a sparse index are refused.
@@ -1938,4 +1938,109 @@ Move the current branch (or a detached HEAD) to another commit, like `git reset`
   "previous": "48ce6b19c89fc67695e4e723b8192fb167fb8f00",
   "staged_total": 0
 }
+```
+
+## `restore`
+
+Restore files from the index or a revision, like `git restore`. By default the working-tree files matching `paths` are restored from the index, discarding unstaged edits. With `staged: true` the index is restored instead, from `HEAD` unless `source` says otherwise (the same as `unstage`, but from any revision). With `staged: true` and `worktree: true`, both are restored. With a revision as `source`, tracked files it doesn't have are deleted, as `git restore --source` does.
+
+Restoring overwrites local edits, so it's a **dry run by default**: the result lists every file that would change and flags `discards_changes` where the current content isn't committed in HEAD or kept in the index, so it couldn't be recovered. Pass `dry_run: false` to write. Files are written as `git checkout` writes them (smudge filters, line endings, symlinks, executable bit), and writes through a symlinked directory that leads outside the repository are refused. Refused while an operation is in progress, and for paths with unresolved conflicts.
+
+**Arguments**
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `paths` | string[] | required | Paths or pathspec patterns, e.g. `["src/main.rs"]`, `["src/"]`, or `["."]` for everything. |
+| `source` | string | `index`, or `HEAD` with `staged` | Where the content comes from: `index` or a revision. |
+| `staged` | boolean | `false` | Restore index entries. |
+| `worktree` | boolean | `true`, or `false` when `staged` is set | Restore working-tree files. |
+| `dry_run` | boolean | `true` | Only report what would change. Set `false` to overwrite. |
+
+**Result**
+
+| Field | Type | Description |
+|---|---|---|
+| `files[]` | array | Files that change, ordered by path; at most 500. |
+| `files[].path` | string | Path relative to the repository root. |
+| `files[].worktree` | ChangeKind \| null | How the working-tree file changes (`added` when recreated, `deleted` when removed); `null` when it's left alone. |
+| `files[].index` | ChangeKind \| null | How the index entry changes; `null` when it's left alone. |
+| `files[].discards_changes` | boolean | True when content that isn't committed in HEAD (or kept in the index) is overwritten. |
+| `files_count` | integer | Number of files that change, including any beyond the listed 500. |
+| `discards_changes` | boolean | True when any file's `discards_changes` is set. |
+| `dry_run` | boolean | Whether this was a dry run. |
+
+**Errors:** empty `paths`, or `paths` matching nothing in the source or index; `staged` with `source: "index"`; both `staged` and `worktree` off; an unknown revision; unresolved conflicts; an operation in progress; a symlinked directory leading outside the repository; a bare repository; the index is locked.
+
+**Example**
+
+```json
+{"paths": ["src/lib.rs"]}
+```
+
+```json
+{
+  "discards_changes": true,
+  "dry_run": true,
+  "files": [{"discards_changes": true, "index": null, "path": "src/lib.rs", "worktree": "modified"}],
+  "files_count": 1
+}
+```
+
+## `switch`
+
+Switch HEAD to another branch and update the working tree and index, like `git switch`. With `create: true` a new branch is created at `start_point` (default HEAD) first, like `git switch -c`; with `detach: true` any revision is checked out without a branch, like `git switch --detach`.
+
+Local changes are safe. A file the switch has to rewrite must have no staged or unstaged changes, and no untracked file may be in the way. Otherwise the switch is refused before anything is written, and the error names the files. Changes to files the switch doesn't touch, and untracked files, are carried over, as in git. A file whose staged version already matches the target is kept as it is. Submodule commits are updated in the index only; the submodule's checkout isn't touched, as with `git switch` without `--recurse-submodules`. HEAD's reflog gets git's `checkout: moving from <old> to <new>` entry.
+
+**Arguments**
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `target` | string | required | Branch to switch to; with `create`, the new branch's name; with `detach`, any revision. |
+| `create` | boolean | `false` | Create `target` as a new branch and switch to it. |
+| `start_point` | string | `HEAD` | Where a new branch starts. Only with `create`. |
+| `detach` | boolean | `false` | Check out `target` with a detached HEAD. |
+
+**Result**
+
+| Field | Type | Description |
+|---|---|---|
+| `branch` | string \| null | Short name of the branch HEAD is on now; `null` for a detached HEAD. |
+| `head` | string | Full SHA of the commit now checked out. |
+| `previous` | string | Where HEAD was before: a branch name, or a full SHA when it was detached. Switch back to it to undo. |
+| `created` | boolean | True when `create` made the branch. |
+| `updated[]` | array | Files the switch changed, each with a `path` and a ChangeKind `change`; at most 500. |
+| `updated_count` | integer | Number of updated files, including any beyond the listed 500. |
+
+Switching to the branch HEAD is already on changes nothing and returns an empty `updated`.
+
+**Errors:** local changes that would be overwritten (named per file: staged changes, unstaged changes, untracked file in the way); no such branch (the message suggests `create` or `detach`); the branch is checked out in another worktree; `create` for an existing branch; `create` with `detach`, or `start_point` without `create`; an operation in progress; a bare repository; the index is locked.
+
+**Examples**
+
+With the demo's unstaged edit to `src/lib.rs`, its staged `src/main.rs` and its untracked `notes.txt`, all carried over:
+
+```json
+{"target": "polish"}
+```
+
+```json
+{
+  "branch": "polish",
+  "created": false,
+  "head": "10fd2e0634518dfc3f069fe8de98d03b71c333ef",
+  "previous": "main",
+  "updated": [{"change": "modified", "path": "README.md"}, {"change": "added", "path": "src/farewell.rs"}],
+  "updated_count": 2
+}
+```
+
+A branch checked out in another worktree:
+
+```json
+{"target": "feature"}
+```
+
+```
+branch `feature` is already checked out at /path/to/demo-review; switch there, or use `detach: true`
 ```

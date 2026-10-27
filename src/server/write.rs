@@ -160,6 +160,44 @@ impl GitServer {
             .await
             .map(Json)
     }
+
+    /// Restore files from the index (default) or a revision, like `git restore`: working-tree files by
+    /// default, the index with `staged: true`, or both. Overwrites local edits, so it's a dry run by
+    /// default: check `files` and `discards_changes`, then set `dry_run: false`.
+    #[tool(annotations(
+        title = "Restore",
+        read_only_hint = false,
+        destructive_hint = true,
+        idempotent_hint = true
+    ))]
+    async fn restore(
+        &self,
+        Parameters(args): Parameters<tools::checkout::RestoreArgs>,
+    ) -> Result<Json<tools::checkout::RestoreResult>, String> {
+        self.repo
+            .run(move |r| tools::checkout::restore(r, args))
+            .await
+            .map(Json)
+    }
+
+    /// Switch HEAD to another branch (or `create` one, or `detach` at a commit) and update the working
+    /// tree and index, like `git switch`. Local changes to files the switch doesn't touch are carried
+    /// over; if it would overwrite any local change it refuses and names the files.
+    #[tool(annotations(
+        title = "Switch",
+        read_only_hint = false,
+        destructive_hint = false,
+        idempotent_hint = false
+    ))]
+    async fn switch(
+        &self,
+        Parameters(args): Parameters<tools::checkout::SwitchArgs>,
+    ) -> Result<Json<tools::checkout::SwitchResult>, String> {
+        self.repo
+            .run(move |r| tools::checkout::switch(r, args))
+            .await
+            .map(Json)
+    }
 }
 
 #[cfg(test)]
@@ -259,5 +297,27 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(reset.0.previous, committed.0.commit.id);
+
+        let restored = server
+            .restore(Parameters(tools::checkout::RestoreArgs {
+                paths: vec![".".into()],
+                source: None,
+                staged: false,
+                worktree: None,
+                dry_run: true,
+            }))
+            .await
+            .unwrap();
+        assert!(restored.0.dry_run);
+        let switched = server
+            .switch(Parameters(tools::checkout::SwitchArgs {
+                target: "feature".into(),
+                create: false,
+                start_point: None,
+                detach: false,
+            }))
+            .await
+            .unwrap();
+        assert_eq!(switched.0.branch.as_deref(), Some("feature"));
     }
 }

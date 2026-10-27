@@ -13,7 +13,7 @@ Options:
 ```
 
 - `--repo` can point at the repository root, any directory inside its working tree, or a bare repository. The server serves exactly one repository per process. Tool path arguments are always relative to that repository's root, whichever directory you pass.
-- `--allow-write` registers the write tools (`create_branch`, `delete_branch`, `rename_branch`, `create_tag`, `stage`, `unstage`, `commit`, `reset`; switching and restoring files follow in Phase 3 of the [roadmap](../ROADMAP.md)). Without it they aren't listed at all, and the server can't change the repository. Write tools record a committer from `user.name` / `user.email` (or `GIT_COMMITTER_NAME` / `GIT_COMMITTER_EMAIL`) and refuse to run without one; `GIT_COMMITTER_DATE` pins the recorded time, as with git.
+- `--allow-write` registers the 10 write tools (`create_branch`, `delete_branch`, `rename_branch`, `create_tag`, `stage`, `unstage`, `commit`, `reset`, `restore`, `switch`; see Phase 3 of the [roadmap](../ROADMAP.md)). Without it they aren't listed at all, and the server can't change the repository. Write tools record a committer from `user.name` / `user.email` (or `GIT_COMMITTER_NAME` / `GIT_COMMITTER_EMAIL`) and refuse to run without one; `GIT_COMMITTER_DATE` pins the recorded time, as with git.
 
 The server speaks MCP over stdin and stdout, so it is started by an MCP client rather than run on its own.
 
@@ -40,6 +40,8 @@ The server reads the repository's git configuration (local, global and system) t
 | `core.autocrlf`, `core.safecrlf` | Line-ending conversion when `stage` hashes files, as with `git add`. |
 | `user.name`, `user.email` (and `author.*`, `committer.*`) | The identity `commit`, `create_tag` and reflog entries record. Required by write tools. |
 | `commit.gpgSign`, `tag.gpgSign` | When `true`, `commit` and annotated `create_tag` refuse, because gitrs-mcp can't sign. |
+| `.gitattributes` filters, `core.autocrlf`, `core.eol` | How `restore` and `switch` write files to the working tree, as `git checkout` does. |
+| `core.logAllRefUpdates` | Whether write tools add reflog entries (default `true` in a repository with a working tree). |
 | `core.hooksPath` | Where `commit` looks for the hooks it reports in `hooks_skipped` (default `.git/hooks`). Hooks are never run. |
 | `branch.<name>.remote` / `.merge`, `remote.<name>.fetch` | The `upstream` reported by `status`. |
 | `core.notesRef`, `notes.displayRef` | Which notes refs `notes` reads when no `ref` is given. |

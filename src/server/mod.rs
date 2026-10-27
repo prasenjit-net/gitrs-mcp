@@ -89,7 +89,7 @@ mod tests {
     use super::*;
     use crate::tools::testutil::fixture_repo;
 
-    const WRITE_TOOLS: [&str; 8] = [
+    const WRITE_TOOLS: [&str; 10] = [
         "create_branch",
         "delete_branch",
         "rename_branch",
@@ -98,6 +98,8 @@ mod tests {
         "unstage",
         "commit",
         "reset",
+        "restore",
+        "switch",
     ];
 
     fn server(path: &std::path::Path, allow_write: bool) -> GitServer {
@@ -133,7 +135,11 @@ mod tests {
             let tool = writable.tool_router.get(name).unwrap();
             assert_eq!(read_only(tool), Some(false), "{name}");
             let destructive = tool.annotations.as_ref().and_then(|a| a.destructive_hint);
-            assert_eq!(destructive, Some(name == "delete_branch"), "{name}");
+            assert_eq!(
+                destructive,
+                Some(matches!(name, "delete_branch" | "restore")),
+                "{name}"
+            );
         }
         assert!(writable.instructions().contains("Write tools are enabled"));
     }

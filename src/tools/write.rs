@@ -109,6 +109,37 @@ pub fn committer(repo: &gix::Repository) -> anyhow::Result<gix::actor::Signature
     Ok(signature.to_owned()?)
 }
 
+/// Record in HEAD's reflog that HEAD moved from `old` to `new`, as git does when HEAD switches to
+/// another branch or is renamed along with its branch. gix's ref transactions only log updates of a
+/// ref's object id, not of HEAD's symbolic target. Skipped when `core.logAllRefUpdates` is false.
+pub fn log_head_move(
+    repo: &gix::Repository,
+    old: Option<gix::ObjectId>,
+    new: gix::ObjectId,
+    message: &str,
+) -> anyhow::Result<()> {
+    if repo.config_snapshot().boolean("core.logAllRefUpdates") == Some(false) {
+        return Ok(());
+    }
+    let line = gix::refs::log::Line {
+        previous_oid: old.unwrap_or_else(|| gix::ObjectId::null(repo.object_hash())),
+        new_oid: new,
+        signature: committer(repo)?,
+        message: message.into(),
+    };
+    let path = repo.git_dir().join("logs").join("HEAD");
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let mut log = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .with_context(|| format!("cannot append to {}", path.display()))?;
+    line.write_to(&mut log)?;
+    Ok(())
+}
+
 /// gix can't sign commits or tags, so when the repository asks for signatures (`key` is
 /// `commit.gpgSign` or `tag.gpgSign`) refuse rather than create an unsigned `what`.
 pub fn refuse_signing(repo: &gix::Repository, key: &str, what: &str) -> anyhow::Result<()> {

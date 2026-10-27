@@ -5,16 +5,20 @@
 //! budgets, path normalization) live here so every tool behaves the same way.
 
 pub mod blame;
+pub mod config;
 pub mod diff;
 pub mod files;
 pub mod grep;
 pub mod history;
 pub mod notes;
+pub mod objects;
 pub mod reflog;
 pub mod refs;
 pub mod repo;
 pub mod revision;
 pub mod status;
+pub mod submodules;
+pub mod worktrees;
 
 use anyhow::{Context, bail};
 use gix::bstr::BString;

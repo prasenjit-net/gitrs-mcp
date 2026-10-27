@@ -10,13 +10,13 @@ _Last updated 2026-10-27._
 |---|---|
 | 0 Scaffold | ✅ Done: 4 tools |
 | 1 Core read | ✅ Done: 9 tools, each checked against the git CLI |
-| 2 Deep read and inspection | 🚧 In progress: 6 of 14 tools |
+| 2 Deep read and inspection | 🚧 In progress: 10 of 14 tools |
 | 3 Safe writes | Planned |
 | 4 History rewriting | Planned |
 | 5 MCP-native extras | Planned |
 | 6 Hardening and release | Planned |
 
-The server has 19 read-only tools. 105 unit tests and the end-to-end smoke test pass, with 94.8% line coverage. `--allow-write` is accepted but registers nothing until Phase 3.
+The server has 23 read-only tools. 121 unit tests and the end-to-end smoke test pass, with 94.9% line coverage. `--allow-write` is accepted but registers nothing until Phase 3.
 
 ## Design principles
 
@@ -46,6 +46,10 @@ src/
    ├─ files.rs      read_file, list_tree
    ├─ grep.rs       grep
    ├─ blame.rs      blame
+   ├─ worktrees.rs  list_worktrees
+   ├─ submodules.rs list_submodules
+   ├─ config.rs     config_get
+   ├─ objects.rs    count_objects
    └─ history.rs    log, show_commit, file_history, search_commits
 ```
 
@@ -167,15 +171,15 @@ All nine tools shipped, each tested against the git CLI (`git status --porcelain
 | `show_tag` ✅ | `name` → tagger, message, target, kind | `find_reference` then `peel` |
 | `reflog` ✅ | `ref = HEAD`, `limit` → entries `{old, new, committer, message}` | `reference.log_iter()` |
 | `list_stashes` ✅ | → entries from `refs/stash` reflog | reflog read only; gix has no stash API |
-| `list_worktrees` | → `{path, branch, head, locked, prunable}` | `repo.worktrees()` |
-| `list_submodules` | → `{name, path, url, recorded_commit, checked_out_commit, state}` | `repo.submodules()` |
+| `list_worktrees` ✅ | → `{path, branch, head, locked, prunable}` | `repo.worktrees()` |
+| `list_submodules` ✅ | → `{name, path, url, recorded_commit, checked_out_commit, state}` | `repo.submodules()` |
 | `conflicts` | → during a merge/rebase: `path`, ours/theirs/base blob ids and optional contents | index stages 1–3 via `open_index()` |
 | `check_ignore` | `paths[]` → matching rule and source file | `repo.excludes(...)` |
 | `check_attr` | `paths[]`, `attrs[]` → values | `repo.attributes(...)` |
-| `config_get` | `key` or `section` → values with scope (local/global/system) | `config_snapshot()`, values redacted: `credential.*`, `*.token`, `*password*`, `http.*.extraheader` |
+| `config_get` ✅ | `key` or `section` → values with scope (local/global/system) | `config_snapshot()`, values redacted: `credential.*`, `*.token`, `*password*`, `http.*.extraheader` |
 | `merge_preview` | `ours`, `theirs` → `clean: bool`, `conflicts[] {path, kind}`, resulting tree id | `merge_commits` in memory only. Nothing is written, so it is read-only and safe |
 | `notes` ✅ | `rev` → notes text | `repo.notes()` |
-| `count_objects` | → loose/packed counts and sizes, commit-graph present? | odb stats |
+| `count_objects` ✅ | → loose/packed counts and sizes, commit-graph present? | odb stats |
 
 **Exit criteria:** code-review and archaeology workflows (“is it safe to merge X into Y?”, “who touches this module?”) work without write access.
 
@@ -192,6 +196,13 @@ All nine tools shipped, each tested against the git CLI (`git status --porcelain
   - Searches tracked files only, like `git grep` without `--untracked`, reading them from disk; `index` searches staged content. The planned `dirwalk` over untracked files wasn't needed for that.
   - Skips binary files, symlinks and submodules like `git grep -I`. Each match reports a byte `column` (`--column`), and its `text` is cut at 512 bytes.
   - Added `fixed_strings` and `skip`. Patterns use Rust regex syntax rather than git's POSIX basic regex.
+- **`list_worktrees`.** Besides path, HEAD, branch, locked and prunable, each entry has `id`, `is_main`, `is_bare`, `detached`, `lock_reason` and `is_current` (the worktree being served). Paginated.
+- **`list_submodules`.** `recorded_commit` is the commit the index records, as `git submodule status` uses; `state` mirrors its prefixes (`uninitialized`, `up_to_date`, `different_commit`, `conflicted`). Added `branch`. URLs get the same password redaction as `config_get`.
+- **`config_get`.**
+  - Takes `key`, `section` (with or without a subsection), or neither to list everything, plus a `scope` filter and pagination. Scopes use git's names: `system`, `global`, `local`, `worktree`, `command`.
+  - Redaction also covers keys containing `passwd` or `secret`, and the password in any URL value.
+  - gix turns environment variables such as `GIT_EDITOR` into configuration values; those are left out, matching `git config --list`.
+- **`count_objects`.** Sizes are in bytes rather than KiB. Added `multi_pack_index` and an `alternates` count; git's `prune-packable` and `garbage` counts aren't reported.
 - **`notes`.** Added `ref` (a notes ref, expanded like `git notes --ref`) and `max_bytes`. `rev` isn't peeled, so a tag's notes are those on the tag object, as in `git notes show`.
 
 ---
@@ -291,7 +302,7 @@ gix has no sequencer, so this phase is where we build our own logic on its primi
 |---|---|---|---|
 | 0 Scaffold | 4 | — | ✅ done |
 | 1 Core read | 9 | ~4.9k lines including tests (planned ~2–3k) | ✅ done |
-| 2 Deep read | 14 | ~2k LOC | 🚧 6 of 14 |
+| 2 Deep read | 14 | ~2k LOC | 🚧 10 of 14 |
 | 3 Safe writes | 10 | ~2–3k LOC (index writing and checkout safety are the hard parts) | planned |
 | 4 Rewriting | 8 | ~3–4k LOC (sequencer and stash) | planned |
 | 5 MCP extras | resources, prompts, progress, multi-repo | ~1.5k LOC | planned |

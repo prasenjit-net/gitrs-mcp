@@ -36,6 +36,10 @@ The server reads the repository's git configuration (local, global and system) t
 | `core.autocrlf`, `.gitattributes` filters | How working-tree files are converted before `diff` compares them with the index, as `git diff` does. |
 | `.gitignore`, `core.excludesFile` | What `status` treats as ignored. |
 | `branch.<name>.remote` / `.merge`, `remote.<name>.fetch` | The `upstream` reported by `status`. |
+| `core.notesRef`, `notes.displayRef` | Which notes refs `notes` reads when no `ref` is given. |
+| `submodule.<name>.url` / `.branch` in `.git/config` | Override `.gitmodules` in `list_submodules`. |
+
+`config_get` reports these and every other setting, but redacts values that may be secrets (credentials, tokens, passwords, `http.extraHeader`, and passwords inside URLs).
 
 Nothing here makes the server touch the network.
 

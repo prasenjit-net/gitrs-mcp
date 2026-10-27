@@ -1,6 +1,6 @@
 # Tool reference
 
-gitrs-mcp exposes 19 read-only tools. This page covers each one: what it does, its arguments and defaults, the fields it returns, the errors it reports, and a real request and response.
+gitrs-mcp exposes 23 read-only tools. This page covers each one: what it does, its arguments and defaults, the fields it returns, the errors it reports, and a real request and response.
 
 - [Conventions](#conventions)
 - [Shared types](#shared-types)
@@ -8,6 +8,7 @@ gitrs-mcp exposes 19 read-only tools. This page covers each one: what it does, i
 - Local changes: [`status`](#status), [`diff`](#diff)
 - Files: [`read_file`](#read_file), [`list_tree`](#list_tree), [`blame`](#blame), [`grep`](#grep)
 - History: [`log`](#log), [`show_commit`](#show_commit), [`file_history`](#file_history), [`search_commits`](#search_commits), [`notes`](#notes)
+- Repository setup: [`list_worktrees`](#list_worktrees), [`list_submodules`](#list_submodules), [`config_get`](#config_get), [`count_objects`](#count_objects)
 
 ## Conventions
 
@@ -25,7 +26,7 @@ These rules hold for every tool.
 
 - **Output** is JSON in `structuredContent`, described by each tool's published `outputSchema`. The same JSON is also sent as text content for clients that don't read structured output. SHAs are always full 40-character hex unless a field is named `short_id`.
 
-The examples come from a small demo repository, which [`scripts/demo-repo.sh`](../scripts/demo-repo.sh) builds with fixed dates so that its SHAs are reproducible: `main` has three commits (`Initial commit`, `Add shout`, `Document usage`) and an annotated tag `v0.1.0` on `Add shout`; `feature` branches from `Add shout` with one commit, `Add farewell`. `Document usage` has a note, and there is one stash. The working tree has an unstaged edit to `src/lib.rs`, a staged new file `src/main.rs`, and an untracked `notes.txt`. Each example shows the call's `arguments` and the `structuredContent` it returned. Local paths are shortened to `/path/to`.
+The examples come from a small demo repository, which [`scripts/demo-repo.sh`](../scripts/demo-repo.sh) builds with fixed dates so that its SHAs are reproducible: `main` has three commits (`Initial commit`, `Add shout`, `Document usage`) and an annotated tag `v0.1.0` on `Add shout`; `feature` branches from `Add shout` with one commit, `Add farewell`. `Document usage` has a note, and there is one stash. `vendor/assets` is a submodule, `origin` is a remote whose URL contains a password (never fetched), and `demo-review` is a locked linked worktree on `feature`. The working tree has an unstaged edit to `src/lib.rs`, a staged new file `src/main.rs`, and an untracked `notes.txt`. Each example shows the call's `arguments` and the `structuredContent` it returned. Local paths are shortened to `/path/to`.
 
 ## Shared types
 
@@ -80,7 +81,7 @@ Repository overview: paths, HEAD, current branch, bareness, shallowness, and any
 {
   "git_dir": "/path/to/demo/.git",
   "head_branch": "main",
-  "head_commit": "3b89450e665e1e0fd5b047fd2c0b16eb6b347ee1",
+  "head_commit": "48ce6b19c89fc67695e4e723b8192fb167fb8f00",
   "in_progress": null,
   "is_bare": false,
   "is_shallow": false,
@@ -117,11 +118,11 @@ List branches and/or tags with the commit each points to.
 ```json
 {
   "refs": [
-    {"is_head": false, "name": "refs/heads/feature", "short_name": "feature", "target": "d40a8e167790c5a3b37bfd4647520dd04b1bd80f"},
-    {"is_head": true, "name": "refs/heads/main", "short_name": "main", "target": "3b89450e665e1e0fd5b047fd2c0b16eb6b347ee1"},
-    {"is_head": false, "name": "refs/notes/commits", "short_name": "notes/commits", "target": "11beb34c385ac4a0bccb8aed6d3fd9d5da27aade"},
-    {"is_head": false, "name": "refs/stash", "short_name": "refs/stash", "target": "64faa7c319a2d4a3d44e06323c19ef6e03ebdc83"},
-    {"is_head": false, "name": "refs/tags/v0.1.0", "short_name": "v0.1.0", "target": "f0a71a147bd95c9f0fbe416c1fe72053307ddf61"}
+    {"is_head": false, "name": "refs/heads/feature", "short_name": "feature", "target": "e9383dc8fce1955c63812c2365edbff4efdffce4"},
+    {"is_head": true, "name": "refs/heads/main", "short_name": "main", "target": "48ce6b19c89fc67695e4e723b8192fb167fb8f00"},
+    {"is_head": false, "name": "refs/notes/commits", "short_name": "notes/commits", "target": "d88da5dd41aab8e6ed9a334203b8caff338e3549"},
+    {"is_head": false, "name": "refs/stash", "short_name": "refs/stash", "target": "dbcd799721ed9636188e6497d1bad21738471383"},
+    {"is_head": false, "name": "refs/tags/v0.1.0", "short_name": "v0.1.0", "target": "41dad034dd469fe144a58a71bcd86453cd70ade1"}
   ]
 }
 ```
@@ -165,7 +166,7 @@ Resolve a revision expression to full object SHAs, like `git rev-parse`. Use it 
 ```
 
 ```json
-{"ids": ["f0a71a147bd95c9f0fbe416c1fe72053307ddf61"], "kind": "single", "merge_base": null, "object_type": "commit"}
+{"ids": ["41dad034dd469fe144a58a71bcd86453cd70ade1"], "kind": "single", "merge_base": null, "object_type": "commit"}
 ```
 
 ```json
@@ -174,9 +175,9 @@ Resolve a revision expression to full object SHAs, like `git rev-parse`. Use it 
 
 ```json
 {
-  "ids": ["3b89450e665e1e0fd5b047fd2c0b16eb6b347ee1", "d40a8e167790c5a3b37bfd4647520dd04b1bd80f"],
+  "ids": ["48ce6b19c89fc67695e4e723b8192fb167fb8f00", "e9383dc8fce1955c63812c2365edbff4efdffce4"],
   "kind": "merge_base_range",
-  "merge_base": "f0a71a147bd95c9f0fbe416c1fe72053307ddf61",
+  "merge_base": "41dad034dd469fe144a58a71bcd86453cd70ade1",
   "object_type": "commit"
 }
 ```
@@ -219,25 +220,25 @@ How two revisions have diverged: their merge base, how many commits `head` is ah
   "ahead_commits": [
     {
       "author": {"email": "ada@example.com", "name": "Ada Lovelace", "offset": 0, "time": 1791036000},
-      "id": "d40a8e167790c5a3b37bfd4647520dd04b1bd80f",
-      "parents": ["f0a71a147bd95c9f0fbe416c1fe72053307ddf61"],
-      "short_id": "d40a8e1",
+      "id": "e9383dc8fce1955c63812c2365edbff4efdffce4",
+      "parents": ["41dad034dd469fe144a58a71bcd86453cd70ade1"],
+      "short_id": "e9383dc",
       "summary": "Add farewell"
     }
   ],
-  "base": "3b89450e665e1e0fd5b047fd2c0b16eb6b347ee1",
+  "base": "48ce6b19c89fc67695e4e723b8192fb167fb8f00",
   "behind": 1,
   "behind_commits": [
     {
       "author": {"email": "ada@example.com", "name": "Ada Lovelace", "offset": 0, "time": 1791101700},
-      "id": "3b89450e665e1e0fd5b047fd2c0b16eb6b347ee1",
-      "parents": ["f0a71a147bd95c9f0fbe416c1fe72053307ddf61"],
-      "short_id": "3b89450",
+      "id": "48ce6b19c89fc67695e4e723b8192fb167fb8f00",
+      "parents": ["41dad034dd469fe144a58a71bcd86453cd70ade1"],
+      "short_id": "48ce6b1",
       "summary": "Document usage"
     }
   ],
-  "head": "d40a8e167790c5a3b37bfd4647520dd04b1bd80f",
-  "merge_base": "f0a71a147bd95c9f0fbe416c1fe72053307ddf61",
+  "head": "e9383dc8fce1955c63812c2365edbff4efdffce4",
+  "merge_base": "41dad034dd469fe144a58a71bcd86453cd70ade1",
   "truncated": false
 }
 ```
@@ -278,7 +279,7 @@ Finding no tag isn't an error: the result falls back to the short SHA with `tag:
 ```
 
 ```json
-{"depth": 1, "description": "v0.1.0-1-g3b89450", "exact": false, "id": "3b89450e665e1e0fd5b047fd2c0b16eb6b347ee1", "tag": "v0.1.0"}
+{"depth": 1, "description": "v0.1.0-1-g48ce6b1", "exact": false, "id": "48ce6b19c89fc67695e4e723b8192fb167fb8f00", "tag": "v0.1.0"}
 ```
 
 ```json
@@ -286,7 +287,7 @@ Finding no tag isn't an error: the result falls back to the short SHA with `tag:
 ```
 
 ```json
-{"depth": 0, "description": "v0.1.0-0-gf0a71a1", "exact": true, "id": "f0a71a147bd95c9f0fbe416c1fe72053307ddf61", "tag": "v0.1.0"}
+{"depth": 0, "description": "v0.1.0-0-g41dad03", "exact": true, "id": "41dad034dd469fe144a58a71bcd86453cd70ade1", "tag": "v0.1.0"}
 ```
 
 ## `show_tag`
@@ -327,12 +328,12 @@ Details of one tag: whether it is annotated or lightweight, the object it points
   "kind": "annotated",
   "message": "First release\n\ngreet and shout.\n",
   "name": "refs/tags/v0.1.0",
-  "peeled": "f0a71a147bd95c9f0fbe416c1fe72053307ddf61",
+  "peeled": "41dad034dd469fe144a58a71bcd86453cd70ade1",
   "peeled_type": "commit",
   "signed": false,
-  "tag_id": "f13dde1adfe38961aa72b29447f86544016df366",
+  "tag_id": "76ad4a90a5f1ebaa255fcaddcb5014a2f4c10d62",
   "tagger": {"email": "ada@example.com", "name": "Ada Lovelace", "offset": 0, "time": 1790937600},
-  "target": "f0a71a147bd95c9f0fbe416c1fe72053307ddf61",
+  "target": "41dad034dd469fe144a58a71bcd86453cd70ade1",
   "target_type": "commit"
 }
 ```
@@ -376,15 +377,15 @@ Where a ref pointed over time, newest first, like `git reflog show <ref>`. Each 
     {
       "committer": {"email": "ada@example.com", "name": "Ada Lovelace", "offset": 0, "time": 1791101700},
       "message": "commit: Document usage",
-      "new_id": "3b89450e665e1e0fd5b047fd2c0b16eb6b347ee1",
-      "old_id": "f0a71a147bd95c9f0fbe416c1fe72053307ddf61",
+      "new_id": "48ce6b19c89fc67695e4e723b8192fb167fb8f00",
+      "old_id": "41dad034dd469fe144a58a71bcd86453cd70ade1",
       "selector": "main@{0}"
     },
     {
       "committer": {"email": "ada@example.com", "name": "Ada Lovelace", "offset": 0, "time": 1790937000},
       "message": "commit: Add shout",
-      "new_id": "f0a71a147bd95c9f0fbe416c1fe72053307ddf61",
-      "old_id": "810ac4d2c6edff3411f0ce5087c05bcfab9007cf",
+      "new_id": "41dad034dd469fe144a58a71bcd86453cd70ade1",
+      "old_id": "73656d92804c0ba5ffeb467a0ca8c8d7d7681bc3",
       "selector": "main@{1}"
     }
   ],
@@ -431,10 +432,10 @@ To see what a stash holds, call `diff` with `from` set to its `base` and `to` se
 {
   "stashes": [
     {
-      "base": "3b89450e665e1e0fd5b047fd2c0b16eb6b347ee1",
+      "base": "48ce6b19c89fc67695e4e723b8192fb167fb8f00",
       "branch": "main",
       "committer": {"email": "ada@example.com", "name": "Ada Lovelace", "offset": 0, "time": 1791105000},
-      "id": "64faa7c319a2d4a3d44e06323c19ef6e03ebdc83",
+      "id": "dbcd799721ed9636188e6497d1bad21738471383",
       "includes_untracked": false,
       "index": 0,
       "message": "On main: try a new intro",
@@ -494,7 +495,7 @@ Renames between HEAD and the index are detected like `git status`: `status.renam
   "clean": false,
   "conflicted": [],
   "counts": {"conflicted": 0, "ignored": 0, "staged": 1, "unstaged": 1, "untracked": 1},
-  "head": "3b89450e665e1e0fd5b047fd2c0b16eb6b347ee1",
+  "head": "48ce6b19c89fc67695e4e723b8192fb167fb8f00",
   "ignored": [],
   "staged": [{"change": "added", "path": "src/main.rs"}],
   "truncated": false,
@@ -600,7 +601,7 @@ When patches don't fit in `max_bytes`, the first patch of a response is cut at a
       "status": "added"
     }
   ],
-  "from": "3b89450e665e1e0fd5b047fd2c0b16eb6b347ee1",
+  "from": "48ce6b19c89fc67695e4e723b8192fb167fb8f00",
   "mode": "staged",
   "to": null,
   "totals": {"additions": null, "deletions": null, "files": 1},
@@ -761,7 +762,7 @@ Which commit last changed each line of a file at a revision, following renames l
   "hunks": [
     {
       "author": {"email": "ada@example.com", "name": "Ada Lovelace", "offset": 0, "time": 1790845200},
-      "commit_id": "810ac4d2c6edff3411f0ce5087c05bcfab9007cf",
+      "commit_id": "73656d92804c0ba5ffeb467a0ca8c8d7d7681bc3",
       "lines": 3,
       "original_path": "src/lib.rs",
       "original_start_line": 1,
@@ -771,7 +772,7 @@ Which commit last changed each line of a file at a revision, following renames l
   ],
   "line_count": 7,
   "path": "src/lib.rs",
-  "rev": "3b89450e665e1e0fd5b047fd2c0b16eb6b347ee1",
+  "rev": "48ce6b19c89fc67695e4e723b8192fb167fb8f00",
   "truncated": false
 }
 ```
@@ -842,7 +843,7 @@ Like `git grep -I`, it skips binary files (a NUL byte in the first 8000 bytes), 
     {"column": 5, "line": 1, "path": "src/farewell.rs", "text": "pub fn farewell(name: &str) -> String {", "text_truncated": false},
     {"column": 5, "line": 1, "path": "src/lib.rs", "text": "pub fn greet(name: &str) -> String {", "text_truncated": false}
   ],
-  "rev": "d40a8e167790c5a3b37bfd4647520dd04b1bd80f",
+  "rev": "e9383dc8fce1955c63812c2365edbff4efdffce4",
   "truncated": true
 }
 ```
@@ -893,16 +894,16 @@ Commit history starting from a revision, newest first.
   "commits": [
     {
       "author": {"email": "ada@example.com", "name": "Ada Lovelace", "offset": 0, "time": 1791101700},
-      "id": "3b89450e665e1e0fd5b047fd2c0b16eb6b347ee1",
-      "parents": ["f0a71a147bd95c9f0fbe416c1fe72053307ddf61"],
-      "short_id": "3b89450",
+      "id": "48ce6b19c89fc67695e4e723b8192fb167fb8f00",
+      "parents": ["41dad034dd469fe144a58a71bcd86453cd70ade1"],
+      "short_id": "48ce6b1",
       "summary": "Document usage"
     },
     {
       "author": {"email": "ada@example.com", "name": "Ada Lovelace", "offset": 0, "time": 1790937000},
-      "id": "f0a71a147bd95c9f0fbe416c1fe72053307ddf61",
-      "parents": ["810ac4d2c6edff3411f0ce5087c05bcfab9007cf"],
-      "short_id": "f0a71a1",
+      "id": "41dad034dd469fe144a58a71bcd86453cd70ade1",
+      "parents": ["73656d92804c0ba5ffeb467a0ca8c8d7d7681bc3"],
+      "short_id": "41dad03",
       "summary": "Add shout"
     }
   ],
@@ -942,11 +943,11 @@ Full metadata and message of one commit.
 {
   "author": {"email": "ada@example.com", "name": "Ada Lovelace", "offset": 0, "time": 1791101700},
   "committer": {"email": "ada@example.com", "name": "Ada Lovelace", "offset": 0, "time": 1791101700},
-  "id": "3b89450e665e1e0fd5b047fd2c0b16eb6b347ee1",
+  "id": "48ce6b19c89fc67695e4e723b8192fb167fb8f00",
   "message": "Document usage\n\nFixes #12\n",
-  "parents": ["f0a71a147bd95c9f0fbe416c1fe72053307ddf61"],
+  "parents": ["41dad034dd469fe144a58a71bcd86453cd70ade1"],
   "summary": "Document usage",
-  "tree": "7fde08b287f99ef322dfdad78e37e56b75c22888"
+  "tree": "12304c5496bbf08bd3066544fe1cd1932f3f392a"
 }
 ```
 
@@ -990,19 +991,19 @@ A path that never existed returns an empty list, not an error.
     {
       "author": {"email": "ada@example.com", "name": "Ada Lovelace", "offset": 0, "time": 1790937000},
       "change": "modified",
-      "id": "f0a71a147bd95c9f0fbe416c1fe72053307ddf61",
-      "parents": ["810ac4d2c6edff3411f0ce5087c05bcfab9007cf"],
+      "id": "41dad034dd469fe144a58a71bcd86453cd70ade1",
+      "parents": ["73656d92804c0ba5ffeb467a0ca8c8d7d7681bc3"],
       "path": "src/lib.rs",
-      "short_id": "f0a71a1",
+      "short_id": "41dad03",
       "summary": "Add shout"
     },
     {
       "author": {"email": "ada@example.com", "name": "Ada Lovelace", "offset": 0, "time": 1790845200},
       "change": "added",
-      "id": "810ac4d2c6edff3411f0ce5087c05bcfab9007cf",
+      "id": "73656d92804c0ba5ffeb467a0ca8c8d7d7681bc3",
       "parents": [],
       "path": "src/lib.rs",
-      "short_id": "810ac4d",
+      "short_id": "73656d9",
       "summary": "Initial commit"
     }
   ],
@@ -1047,9 +1048,9 @@ Find commits by message, author, date and changed path. Every filter you pass mu
   "commits": [
     {
       "author": {"email": "ada@example.com", "name": "Ada Lovelace", "offset": 0, "time": 1791101700},
-      "id": "3b89450e665e1e0fd5b047fd2c0b16eb6b347ee1",
-      "parents": ["f0a71a147bd95c9f0fbe416c1fe72053307ddf61"],
-      "short_id": "3b89450",
+      "id": "48ce6b19c89fc67695e4e723b8192fb167fb8f00",
+      "parents": ["41dad034dd469fe144a58a71bcd86453cd70ade1"],
+      "short_id": "48ce6b1",
       "summary": "Document usage"
     }
   ],
@@ -1090,7 +1091,7 @@ Notes attached to a commit or another object, like `git notes show`. Notes are t
 
 ```json
 {
-  "id": "3b89450e665e1e0fd5b047fd2c0b16eb6b347ee1",
+  "id": "48ce6b19c89fc67695e4e723b8192fb167fb8f00",
   "notes": [
     {
       "note_id": "6127b25d6086a22684f64503d9e7f8f921f4e7fb",
@@ -1099,5 +1100,237 @@ Notes attached to a commit or another object, like `git notes show`. Notes are t
       "truncated": false
     }
   ]
+}
+```
+
+## `list_worktrees`
+
+Every worktree of the repository, like `git worktree list`: the main worktree first, then linked worktrees (created with `git worktree add`) ordered by their id.
+
+**Arguments**
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `limit` | integer | 100 (max 1000) | Maximum worktrees to return. |
+| `skip` | integer | 0 | Worktrees to skip first, for pagination. |
+
+**Result**
+
+| Field | Type | Description |
+|---|---|---|
+| `worktrees[]` | array | The main worktree first, then linked worktrees ordered by `id`. |
+| `worktrees[].path` | string \| null | Absolute path of the checkout (for a bare main repository, the repository itself); `null` when a linked worktree's registration can't be read. |
+| `worktrees[].id` | string \| null | Name of a linked worktree, its directory under `.git/worktrees/`; `null` for the main worktree. |
+| `worktrees[].is_main` | boolean | True for the main worktree. |
+| `worktrees[].is_bare` | boolean | True when the main repository is bare. `git worktree list` prints no HEAD or branch for it; this tool still reports them. |
+| `worktrees[].is_current` | boolean | True for the worktree this server serves. |
+| `worktrees[].head` | string \| null | Full SHA of the worktree's HEAD; `null` when its branch has no commits yet. |
+| `worktrees[].branch` | string \| null | Short name of the branch checked out; `null` when HEAD is detached. |
+| `worktrees[].detached` | boolean | True when HEAD is detached. |
+| `worktrees[].locked` | boolean | True when locked with `git worktree lock`, so it won't be pruned, moved or removed. |
+| `worktrees[].lock_reason` | string \| null | The reason given when locking. |
+| `worktrees[].prunable` | boolean | True when the checkout directory is gone, so `git worktree prune` would remove the registration. |
+| `truncated` | boolean | True if more worktrees exist past this page. |
+
+**Example**
+
+```json
+{}
+```
+
+```json
+{
+  "truncated": false,
+  "worktrees": [
+    {
+      "branch": "main",
+      "detached": false,
+      "head": "48ce6b19c89fc67695e4e723b8192fb167fb8f00",
+      "id": null,
+      "is_bare": false,
+      "is_current": true,
+      "is_main": true,
+      "lock_reason": null,
+      "locked": false,
+      "path": "/path/to/demo",
+      "prunable": false
+    },
+    {
+      "branch": "feature",
+      "detached": false,
+      "head": "e9383dc8fce1955c63812c2365edbff4efdffce4",
+      "id": "demo-review",
+      "is_bare": false,
+      "is_current": false,
+      "is_main": false,
+      "lock_reason": "reviewing feature",
+      "locked": true,
+      "path": "/path/to/demo-review",
+      "prunable": false
+    }
+  ]
+}
+```
+
+## `list_submodules`
+
+Submodules declared in `.gitmodules`, ordered by path, like `git submodule status`. For each one it reports the commit the superproject's index records, the commit checked out, and how they relate.
+
+**Arguments**
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `limit` | integer | 100 (max 1000) | Maximum submodules to return. |
+| `skip` | integer | 0 | Submodules to skip first, for pagination. |
+
+**Result**
+
+| Field | Type | Description |
+|---|---|---|
+| `submodules[]` | array | Submodules ordered by path. Empty when there is no `.gitmodules`. |
+| `submodules[].name` | string | Name from `.gitmodules`; often the same as `path`. |
+| `submodules[].path` | string | Path relative to the repository root. |
+| `submodules[].url` | string \| null | Configured URL (`.git/config` overrides `.gitmodules`), with any password redacted. Relative URLs such as `../lib` are returned as written. |
+| `submodules[].branch` | string \| null | Branch the submodule follows (`submodule.<name>.branch`), or `.` for the superproject's current branch. |
+| `submodules[].recorded_commit` | string \| null | Commit the superproject's index records; `null` when the path isn't in the index or is conflicted. |
+| `submodules[].checked_out_commit` | string \| null | Commit checked out in the submodule; `null` when it isn't checked out. |
+| `submodules[].state` | string | `uninitialized` (not checked out, `-` in `git submodule status`), `up_to_date`, `different_commit` (`+`), or `conflicted` (`U`). |
+| `truncated` | boolean | True if more submodules exist past this page. |
+
+**Example**
+
+```json
+{}
+```
+
+```json
+{
+  "submodules": [
+    {
+      "branch": null,
+      "checked_out_commit": "666ff47cda0654e2425c5502e6db62804c86eb61",
+      "name": "vendor/assets",
+      "path": "vendor/assets",
+      "recorded_commit": "666ff47cda0654e2425c5502e6db62804c86eb61",
+      "state": "up_to_date",
+      "url": "/path/to/assets"
+    }
+  ],
+  "truncated": false
+}
+```
+
+## `config_get`
+
+Git configuration values with the scope and file each one comes from, like `git config --show-scope --show-origin`. Ask for one `key`, a whole `section`, or everything.
+
+Values that may be secrets are replaced with `<redacted>` and flagged: anything under `credential`, keys whose name contains `password`, `passwd`, `token` or `secret`, `http.extraHeader`, and the password part of any URL (`https://user:<redacted>@host`). gix also turns some environment variables (such as `GIT_EDITOR` or `HTTPS_PROXY`) into configuration; like `git config --list`, this tool doesn't list those.
+
+**Arguments**
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `key` | string | none | A full key such as `user.email` or `remote.origin.url`; every value set for it is returned. Section and name are case-insensitive, the subsection in the middle isn't. |
+| `section` | string | none | A section such as `core`, `remote` (every remote) or `remote.origin`, to list all of its keys. Omit both `key` and `section` to list everything. |
+| `scope` | `system` \| `global` \| `local` \| `worktree` \| `command` | all | Only return values from this scope. |
+| `limit` | integer | 100 (max 1000) | Maximum entries to return. |
+| `skip` | integer | 0 | Entries to skip first, for pagination. |
+
+**Result**
+
+| Field | Type | Description |
+|---|---|---|
+| `entries[]` | array | Matching entries in the order git reads them: system, global, local, worktree, then command. When a single-valued key is set more than once, the last entry is the one git uses. |
+| `entries[].key` | string | Full key, section and name in lowercase and the subsection as written, e.g. `remote.origin.url`. |
+| `entries[].value` | string \| null | The value; `null` for a key written without `=`, which git reads as boolean true. |
+| `entries[].scope` | string | `system`, `global` (`~/.gitconfig`), `local` (`.git/config`), `worktree` (`config.worktree`), or `command` (`GIT_CONFIG_COUNT` and `git -c` values). |
+| `entries[].file` | string \| null | File the value was read from; `null` for values from the environment. |
+| `entries[].redacted` | boolean | True when `value` was hidden because it may be a secret. |
+| `truncated` | boolean | True if more entries exist past this page. |
+
+**Errors:** both `key` and `section` given; a `key` without a section part: `` `key` must look like `section.name` or `section.subsection.name`, e.g. `user.email`; use `section` to list a whole section ``.
+
+**Examples**
+
+```json
+{"section": "remote.origin"}
+```
+
+```json
+{
+  "entries": [
+    {
+      "file": "/path/to/demo/.git/config",
+      "key": "remote.origin.url",
+      "redacted": true,
+      "scope": "local",
+      "value": "https://ada:<redacted>@example.com/greet.git"
+    },
+    {
+      "file": "/path/to/demo/.git/config",
+      "key": "remote.origin.fetch",
+      "redacted": false,
+      "scope": "local",
+      "value": "+refs/heads/*:refs/remotes/origin/*"
+    }
+  ],
+  "truncated": false
+}
+```
+
+```json
+{"key": "core.bare"}
+```
+
+```json
+{
+  "entries": [
+    {
+      "file": "/path/to/demo/.git/config",
+      "key": "core.bare",
+      "redacted": false,
+      "scope": "local",
+      "value": "false"
+    }
+  ],
+  "truncated": false
+}
+```
+
+## `count_objects`
+
+Statistics for the repository's object database, like `git count-objects -v`, with sizes in bytes instead of KiB.
+
+**Arguments:** none.
+
+**Result**
+
+| Field | Type | Description |
+|---|---|---|
+| `loose_objects` | integer | Number of loose objects, one compressed file each under `.git/objects/xx/`. |
+| `loose_bytes` | integer | Disk space the loose objects take, in bytes (allocated blocks, as git measures it). |
+| `packed_objects` | integer | Objects in pack files, counted per pack: an object in two packs counts twice, as in git. |
+| `packs` | integer | Number of pack files. |
+| `pack_bytes` | integer | Total size of the pack files and their indexes, in bytes. |
+| `commit_graph` | boolean | True when a commit-graph file exists, which speeds up history walks. |
+| `multi_pack_index` | boolean | True when a multi-pack index exists. |
+| `alternates` | integer | Number of other object directories this repository borrows objects from (`objects/info/alternates`). Their objects aren't counted. |
+
+**Example**
+
+```json
+{}
+```
+
+```json
+{
+  "alternates": 0,
+  "commit_graph": false,
+  "loose_bytes": 118784,
+  "loose_objects": 29,
+  "multi_pack_index": false,
+  "pack_bytes": 0,
+  "packed_objects": 0,
+  "packs": 0
 }
 ```

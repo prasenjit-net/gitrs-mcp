@@ -8,6 +8,7 @@ mod changes;
 mod files;
 mod history;
 mod repo;
+mod setup;
 
 use rmcp::{
     ServerHandler,
@@ -41,7 +42,8 @@ impl GitServer {
             tool_router: Self::repo_router()
                 + Self::changes_router()
                 + Self::files_router()
-                + Self::history_router(),
+                + Self::history_router()
+                + Self::setup_router(),
         }
     }
 }

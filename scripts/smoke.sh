@@ -37,8 +37,12 @@ requests=(
   "$(call 19 list_stashes '{"limit":3}')"
   "$(call 20 notes '{}')"
   "$(call 21 grep '{"pattern":"\\w","limit":3}')"
+  "$(call 22 list_worktrees '{}')"
+  "$(call 23 list_submodules '{}')"
+  "$(call 24 config_get '{"section":"core","limit":3}')"
+  "$(call 25 count_objects '{}')"
 )
-last_id=21
+last_id=25
 expect_error='17' # space-separated request ids that must return a tool error
 
 # Keep stdin open briefly so the server can answer before seeing EOF.

@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# Build the demo repository the examples in docs/tools.md come from, at <dir>.
+# Build the demo workspace the examples in docs/tools.md come from, under <dir>:
+#   <dir>/demo         the demo repository (serve this one)
+#   <dir>/demo-review  a linked worktree of demo, on `feature`, locked
+#   <dir>/assets       a small repository that demo uses as the submodule `vendor/assets`
 # Identities and dates are fixed, so every run produces the same SHAs.
 # Usage: scripts/demo-repo.sh <dir>
 set -euo pipefail
@@ -13,12 +16,19 @@ export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 export GIT_AUTHOR_NAME="Ada Lovelace" GIT_AUTHOR_EMAIL=ada@example.com
 export GIT_COMMITTER_NAME="Ada Lovelace" GIT_COMMITTER_EMAIL=ada@example.com
 at() { export GIT_AUTHOR_DATE="@$1 +0000" GIT_COMMITTER_DATE="@$1 +0000"; }
-git init -q -b main
+
+git init -q -b main assets
+printf 'body { font-family: serif; }\n' > assets/style.css
+git -C assets add . && at 1790841600 && git -C assets commit -q -m "Add stylesheet"
+
+git init -q -b main demo
+cd demo
 mkdir src
 printf '# greet\n\nA tiny greeting library.\n' > README.md
 printf 'pub fn greet(name: &str) -> String {\n    format!("Hello, {name}!")\n}\n' > src/lib.rs
 printf 'target/\n*.log\n' > .gitignore
 printf '*.rs diff=rust\n*.png binary\n' > .gitattributes
+git -c protocol.file.allow=always submodule add -q ../assets vendor/assets
 git add . && at 1790845200 && git commit -q -m "Initial commit"
 printf '\npub fn shout(name: &str) -> String {\n    greet(name).to_uppercase()\n}\n' >> src/lib.rs
 git add . && at 1790937000 && git commit -q -m "Add shout" -m "Uppercase variant of greet."
@@ -32,6 +42,10 @@ git add . && at 1791101700 && git commit -q -m "Document usage" -m "Fixes #12"
 at 1791102000 && git notes add -m "Reviewed-by: Grace Hopper <grace@example.com>" HEAD
 printf '# greet\n\nGreetings, politely or loudly.\n' > README.md.tmp && mv README.md.tmp README.md
 at 1791105000 && git stash push -q -m "try a new intro"
+# A remote whose URL embeds a password, to show config_get redacting it. Nothing is ever fetched.
+git remote add origin https://ada:hunter2@example.com/greet.git
+git worktree add -q ../demo-review feature
+git worktree lock --reason "reviewing feature" ../demo-review
 # Working tree: unstaged edit, staged new file, untracked file.
 sed 's/Hello, {name}!/Hello, {name}!!/' src/lib.rs > src/lib.rs.new && mv src/lib.rs.new src/lib.rs
 printf 'fn main() {\n    println!("{}", greet::greet("world"));\n}\n' > src/main.rs

@@ -10,7 +10,7 @@ It lets AI assistants inspect a Git repository through typed tools with structur
 - **Structured output.** Every tool returns JSON with a published output schema. Bad input, such as an unknown revision, comes back as a tool error the model can read and correct.
 - **Pure Rust.** It runs as a single static binary that speaks MCP over stdio, and it doesn't need `libgit2` or the `git` executable.
 
-> **Status:** early development. Phases 0 and 1 of the [roadmap](ROADMAP.md) are done, and Phase 2 is under way: 19 read-only tools covering status, diffs, file contents, code search, history, blame, refs, tags, reflogs, stashes and notes. Write tools come in Phase 3.
+> **Status:** early development. Phases 0 and 1 of the [roadmap](ROADMAP.md) are done, and Phase 2 is under way: 23 read-only tools covering status, diffs, file contents, code search, history, blame, refs, tags, reflogs, stashes, notes, worktrees, submodules, config and object stats. Write tools come in Phase 3.
 
 ## Install
 
@@ -88,8 +88,12 @@ Revision arguments accept anything `git rev-parse` does: SHAs and SHA prefixes, 
 | `list_stashes` | `limit?`, `skip?` | Stashes newest first: `stash@{n}`, commit, base commit, branch, message, untracked flag |
 | `notes` | `rev?`, `ref?`, `max_bytes?` | Notes attached to a commit or object, per notes ref |
 | `repo_info` | none | git dir, worktree, bare/shallow flags, current branch, HEAD commit, in-progress operation (merge, rebase, …) |
+| `list_worktrees` | `limit?`, `skip?` | Main and linked worktrees: path, HEAD, branch, locked/prunable, which one is served |
+| `list_submodules` | `limit?`, `skip?` | Submodules with URL (passwords redacted), recorded and checked-out commits, and state, like `git submodule status` |
+| `config_get` | `key?` or `section?`, `scope?`, `limit?`, `skip?` | Config values with scope and file; credentials, tokens, passwords and auth headers redacted |
+| `count_objects` | none | Loose and packed object counts and sizes, packs, commit-graph and multi-pack-index presence |
 
-The full reference, with every argument, result field, error and a real example per tool, is in [docs/tools.md](docs/tools.md). The rest of Phase 2 adds merge previews, conflict inspection, ignore and attribute checks, config, worktree and submodule listings; Phase 3 adds safe write tools behind `--allow-write`. See [ROADMAP.md](ROADMAP.md).
+The full reference, with every argument, result field, error and a real example per tool, is in [docs/tools.md](docs/tools.md). The rest of Phase 2 adds merge previews, conflict inspection, and ignore and attribute checks; Phase 3 adds safe write tools behind `--allow-write`. See [ROADMAP.md](ROADMAP.md).
 
 ## Documentation
 
@@ -132,8 +136,12 @@ src/
    ├─ files.rs      read_file, list_tree
    ├─ grep.rs       grep
    ├─ blame.rs      blame
+   ├─ worktrees.rs  list_worktrees
+   ├─ submodules.rs list_submodules
+   ├─ config.rs     config_get (with secret redaction)
+   ├─ objects.rs    count_objects
    └─ history.rs    log, show_commit, file_history, search_commits
 scripts/smoke.sh      stdio MCP smoke test
-scripts/demo-repo.sh  builds the demo repository the docs examples come from
+scripts/demo-repo.sh  builds the demo workspace the docs examples come from
 docs/                 user and contributor documentation
 ```

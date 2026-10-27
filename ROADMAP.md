@@ -180,7 +180,7 @@ All nine tools shipped, each tested against the git CLI (`git status --porcelain
 
 ### Phase 2: deviations from the plan
 
-- **Across tools.** `server.rs` was split into one router per area before the first Phase 2 tool landed. The docs examples now come from `scripts/demo-repo.sh`, which builds the demo repository with fixed dates so its SHAs are reproducible.
+- **Across tools.** `server.rs` was split into one router per area before the first Phase 2 tool landed. The docs examples, Phase 1's included, now come from `scripts/demo-repo.sh`, which builds the demo repository with fixed dates so its SHAs are reproducible. It recreates the original hand-built demo's files (adding an annotated tag, a note and a stash), so only SHAs changed in the existing examples.
 - **`describe`.**
   - When no tag is reachable it returns the short SHA with `tag: null`, like `git describe --always`, instead of failing.
   - Added `tags`, `long` and `first_parent`. `--all` isn't offered: gix names branch candidates `main` where git prints `heads/main`, so the output wouldn't match git.

@@ -19,21 +19,21 @@ printf '# greet\n\nA tiny greeting library.\n' > README.md
 printf 'pub fn greet(name: &str) -> String {\n    format!("Hello, {name}!")\n}\n' > src/lib.rs
 printf 'target/\n*.log\n' > .gitignore
 printf '*.rs diff=rust\n*.png binary\n' > .gitattributes
-git add . && at 1790850600 && git commit -q -m "Initial commit"
+git add . && at 1790845200 && git commit -q -m "Initial commit"
 printf '\npub fn shout(name: &str) -> String {\n    greet(name).to_uppercase()\n}\n' >> src/lib.rs
 git add . && at 1790937000 && git commit -q -m "Add shout" -m "Uppercase variant of greet."
 at 1790937600 && git tag -a v0.1.0 -m "First release" -m "greet and shout."
 git checkout -q -b feature
-printf '\npub fn farewell(name: &str) -> String {\n    format!("Goodbye, {name}!")\n}\n' >> src/lib.rs
-git add . && at 1791015000 && git commit -q -m "Add farewell"
+printf 'pub fn farewell(name: &str) -> String {\n    format!("Goodbye, {name}.")\n}\n' > src/farewell.rs
+git add . && at 1791036000 && git commit -q -m "Add farewell"
 git checkout -q main
 printf '\n## Usage\n\n```rust\nlet hi = greet::greet("Ada");\n```\n' >> README.md
-git add . && at 1791101700 && git commit -q -m "Document usage"
+git add . && at 1791101700 && git commit -q -m "Document usage" -m "Fixes #12"
 at 1791102000 && git notes add -m "Reviewed-by: Grace Hopper <grace@example.com>" HEAD
 printf '# greet\n\nGreetings, politely or loudly.\n' > README.md.tmp && mv README.md.tmp README.md
 at 1791105000 && git stash push -q -m "try a new intro"
 # Working tree: unstaged edit, staged new file, untracked file.
-printf '\n// TODO: localise\n' >> src/lib.rs
+sed 's/Hello, {name}!/Hello, {name}!!/' src/lib.rs > src/lib.rs.new && mv src/lib.rs.new src/lib.rs
 printf 'fn main() {\n    println!("{}", greet::greet("world"));\n}\n' > src/main.rs
 git add src/main.rs
 printf 'scratch notes\n' > notes.txt

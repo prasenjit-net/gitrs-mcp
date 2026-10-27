@@ -80,7 +80,7 @@ Repository overview: paths, HEAD, current branch, bareness, shallowness, and any
 {
   "git_dir": "/path/to/demo/.git",
   "head_branch": "main",
-  "head_commit": "5460c0a41263705620de40e2acd9d7b31636428e",
+  "head_commit": "3b89450e665e1e0fd5b047fd2c0b16eb6b347ee1",
   "in_progress": null,
   "is_bare": false,
   "is_shallow": false,
@@ -117,9 +117,11 @@ List branches and/or tags with the commit each points to.
 ```json
 {
   "refs": [
-    {"is_head": false, "name": "refs/heads/feature", "short_name": "feature", "target": "112475a8a2f1e49b3f76b0ccdcef1fc83ace4d95"},
-    {"is_head": true, "name": "refs/heads/main", "short_name": "main", "target": "5460c0a41263705620de40e2acd9d7b31636428e"},
-    {"is_head": false, "name": "refs/tags/v0.1.0", "short_name": "v0.1.0", "target": "80379d391035439ec71fe40214a153757e0e3eb6"}
+    {"is_head": false, "name": "refs/heads/feature", "short_name": "feature", "target": "d40a8e167790c5a3b37bfd4647520dd04b1bd80f"},
+    {"is_head": true, "name": "refs/heads/main", "short_name": "main", "target": "3b89450e665e1e0fd5b047fd2c0b16eb6b347ee1"},
+    {"is_head": false, "name": "refs/notes/commits", "short_name": "notes/commits", "target": "11beb34c385ac4a0bccb8aed6d3fd9d5da27aade"},
+    {"is_head": false, "name": "refs/stash", "short_name": "refs/stash", "target": "64faa7c319a2d4a3d44e06323c19ef6e03ebdc83"},
+    {"is_head": false, "name": "refs/tags/v0.1.0", "short_name": "v0.1.0", "target": "f0a71a147bd95c9f0fbe416c1fe72053307ddf61"}
   ]
 }
 ```
@@ -163,12 +165,7 @@ Resolve a revision expression to full object SHAs, like `git rev-parse`. Use it 
 ```
 
 ```json
-{
-  "ids": ["80379d391035439ec71fe40214a153757e0e3eb6"],
-  "kind": "single",
-  "merge_base": null,
-  "object_type": "commit"
-}
+{"ids": ["f0a71a147bd95c9f0fbe416c1fe72053307ddf61"], "kind": "single", "merge_base": null, "object_type": "commit"}
 ```
 
 ```json
@@ -177,12 +174,9 @@ Resolve a revision expression to full object SHAs, like `git rev-parse`. Use it 
 
 ```json
 {
-  "ids": [
-    "5460c0a41263705620de40e2acd9d7b31636428e",
-    "112475a8a2f1e49b3f76b0ccdcef1fc83ace4d95"
-  ],
+  "ids": ["3b89450e665e1e0fd5b047fd2c0b16eb6b347ee1", "d40a8e167790c5a3b37bfd4647520dd04b1bd80f"],
   "kind": "merge_base_range",
-  "merge_base": "80379d391035439ec71fe40214a153757e0e3eb6",
+  "merge_base": "f0a71a147bd95c9f0fbe416c1fe72053307ddf61",
   "object_type": "commit"
 }
 ```
@@ -225,25 +219,25 @@ How two revisions have diverged: their merge base, how many commits `head` is ah
   "ahead_commits": [
     {
       "author": {"email": "ada@example.com", "name": "Ada Lovelace", "offset": 0, "time": 1791036000},
-      "id": "112475a8a2f1e49b3f76b0ccdcef1fc83ace4d95",
-      "parents": ["80379d391035439ec71fe40214a153757e0e3eb6"],
-      "short_id": "112475a",
+      "id": "d40a8e167790c5a3b37bfd4647520dd04b1bd80f",
+      "parents": ["f0a71a147bd95c9f0fbe416c1fe72053307ddf61"],
+      "short_id": "d40a8e1",
       "summary": "Add farewell"
     }
   ],
-  "base": "5460c0a41263705620de40e2acd9d7b31636428e",
+  "base": "3b89450e665e1e0fd5b047fd2c0b16eb6b347ee1",
   "behind": 1,
   "behind_commits": [
     {
       "author": {"email": "ada@example.com", "name": "Ada Lovelace", "offset": 0, "time": 1791101700},
-      "id": "5460c0a41263705620de40e2acd9d7b31636428e",
-      "parents": ["80379d391035439ec71fe40214a153757e0e3eb6"],
-      "short_id": "5460c0a",
+      "id": "3b89450e665e1e0fd5b047fd2c0b16eb6b347ee1",
+      "parents": ["f0a71a147bd95c9f0fbe416c1fe72053307ddf61"],
+      "short_id": "3b89450",
       "summary": "Document usage"
     }
   ],
-  "head": "112475a8a2f1e49b3f76b0ccdcef1fc83ace4d95",
-  "merge_base": "80379d391035439ec71fe40214a153757e0e3eb6",
+  "head": "d40a8e167790c5a3b37bfd4647520dd04b1bd80f",
+  "merge_base": "f0a71a147bd95c9f0fbe416c1fe72053307ddf61",
   "truncated": false
 }
 ```
@@ -284,7 +278,7 @@ Finding no tag isn't an error: the result falls back to the short SHA with `tag:
 ```
 
 ```json
-{"depth": 1, "description": "v0.1.0-1-g67de0e9", "exact": false, "id": "67de0e9d5f784a1b2225dc65fef33f49b8a942d0", "tag": "v0.1.0"}
+{"depth": 1, "description": "v0.1.0-1-g3b89450", "exact": false, "id": "3b89450e665e1e0fd5b047fd2c0b16eb6b347ee1", "tag": "v0.1.0"}
 ```
 
 ```json
@@ -292,7 +286,7 @@ Finding no tag isn't an error: the result falls back to the short SHA with `tag:
 ```
 
 ```json
-{"depth": 0, "description": "v0.1.0-0-g5d06ac7", "exact": true, "id": "5d06ac74150faf79312e88be17be1d8d0b4b56d4", "tag": "v0.1.0"}
+{"depth": 0, "description": "v0.1.0-0-gf0a71a1", "exact": true, "id": "f0a71a147bd95c9f0fbe416c1fe72053307ddf61", "tag": "v0.1.0"}
 ```
 
 ## `show_tag`
@@ -333,12 +327,12 @@ Details of one tag: whether it is annotated or lightweight, the object it points
   "kind": "annotated",
   "message": "First release\n\ngreet and shout.\n",
   "name": "refs/tags/v0.1.0",
-  "peeled": "5d06ac74150faf79312e88be17be1d8d0b4b56d4",
+  "peeled": "f0a71a147bd95c9f0fbe416c1fe72053307ddf61",
   "peeled_type": "commit",
   "signed": false,
-  "tag_id": "01aff835697690674fd2017184bfbe67c288e94c",
+  "tag_id": "f13dde1adfe38961aa72b29447f86544016df366",
   "tagger": {"email": "ada@example.com", "name": "Ada Lovelace", "offset": 0, "time": 1790937600},
-  "target": "5d06ac74150faf79312e88be17be1d8d0b4b56d4",
+  "target": "f0a71a147bd95c9f0fbe416c1fe72053307ddf61",
   "target_type": "commit"
 }
 ```
@@ -382,15 +376,15 @@ Where a ref pointed over time, newest first, like `git reflog show <ref>`. Each 
     {
       "committer": {"email": "ada@example.com", "name": "Ada Lovelace", "offset": 0, "time": 1791101700},
       "message": "commit: Document usage",
-      "new_id": "67de0e9d5f784a1b2225dc65fef33f49b8a942d0",
-      "old_id": "5d06ac74150faf79312e88be17be1d8d0b4b56d4",
+      "new_id": "3b89450e665e1e0fd5b047fd2c0b16eb6b347ee1",
+      "old_id": "f0a71a147bd95c9f0fbe416c1fe72053307ddf61",
       "selector": "main@{0}"
     },
     {
       "committer": {"email": "ada@example.com", "name": "Ada Lovelace", "offset": 0, "time": 1790937000},
       "message": "commit: Add shout",
-      "new_id": "5d06ac74150faf79312e88be17be1d8d0b4b56d4",
-      "old_id": "dff000b0866aea7e696479cecb3342c9cab947c4",
+      "new_id": "f0a71a147bd95c9f0fbe416c1fe72053307ddf61",
+      "old_id": "810ac4d2c6edff3411f0ce5087c05bcfab9007cf",
       "selector": "main@{1}"
     }
   ],
@@ -437,10 +431,10 @@ To see what a stash holds, call `diff` with `from` set to its `base` and `to` se
 {
   "stashes": [
     {
-      "base": "67de0e9d5f784a1b2225dc65fef33f49b8a942d0",
+      "base": "3b89450e665e1e0fd5b047fd2c0b16eb6b347ee1",
       "branch": "main",
       "committer": {"email": "ada@example.com", "name": "Ada Lovelace", "offset": 0, "time": 1791105000},
-      "id": "f7cde13eeb4704536ab9c32cb9a13d2c9f2a74dc",
+      "id": "64faa7c319a2d4a3d44e06323c19ef6e03ebdc83",
       "includes_untracked": false,
       "index": 0,
       "message": "On main: try a new intro",
@@ -500,7 +494,7 @@ Renames between HEAD and the index are detected like `git status`: `status.renam
   "clean": false,
   "conflicted": [],
   "counts": {"conflicted": 0, "ignored": 0, "staged": 1, "unstaged": 1, "untracked": 1},
-  "head": "5460c0a41263705620de40e2acd9d7b31636428e",
+  "head": "3b89450e665e1e0fd5b047fd2c0b16eb6b347ee1",
   "ignored": [],
   "staged": [{"change": "added", "path": "src/main.rs"}],
   "truncated": false,
@@ -606,7 +600,7 @@ When patches don't fit in `max_bytes`, the first patch of a response is cut at a
       "status": "added"
     }
   ],
-  "from": "5460c0a41263705620de40e2acd9d7b31636428e",
+  "from": "3b89450e665e1e0fd5b047fd2c0b16eb6b347ee1",
   "mode": "staged",
   "to": null,
   "totals": {"additions": null, "deletions": null, "files": 1},
@@ -767,7 +761,7 @@ Which commit last changed each line of a file at a revision, following renames l
   "hunks": [
     {
       "author": {"email": "ada@example.com", "name": "Ada Lovelace", "offset": 0, "time": 1790845200},
-      "commit_id": "d2578063e29599512e369efc4c2130f7d6859624",
+      "commit_id": "810ac4d2c6edff3411f0ce5087c05bcfab9007cf",
       "lines": 3,
       "original_path": "src/lib.rs",
       "original_start_line": 1,
@@ -777,7 +771,7 @@ Which commit last changed each line of a file at a revision, following renames l
   ],
   "line_count": 7,
   "path": "src/lib.rs",
-  "rev": "5460c0a41263705620de40e2acd9d7b31636428e",
+  "rev": "3b89450e665e1e0fd5b047fd2c0b16eb6b347ee1",
   "truncated": false
 }
 ```
@@ -817,16 +811,16 @@ Commit history starting from a revision, newest first.
   "commits": [
     {
       "author": {"email": "ada@example.com", "name": "Ada Lovelace", "offset": 0, "time": 1791101700},
-      "id": "5460c0a41263705620de40e2acd9d7b31636428e",
-      "parents": ["80379d391035439ec71fe40214a153757e0e3eb6"],
-      "short_id": "5460c0a",
+      "id": "3b89450e665e1e0fd5b047fd2c0b16eb6b347ee1",
+      "parents": ["f0a71a147bd95c9f0fbe416c1fe72053307ddf61"],
+      "short_id": "3b89450",
       "summary": "Document usage"
     },
     {
       "author": {"email": "ada@example.com", "name": "Ada Lovelace", "offset": 0, "time": 1790937000},
-      "id": "80379d391035439ec71fe40214a153757e0e3eb6",
-      "parents": ["d2578063e29599512e369efc4c2130f7d6859624"],
-      "short_id": "80379d3",
+      "id": "f0a71a147bd95c9f0fbe416c1fe72053307ddf61",
+      "parents": ["810ac4d2c6edff3411f0ce5087c05bcfab9007cf"],
+      "short_id": "f0a71a1",
       "summary": "Add shout"
     }
   ],
@@ -866,11 +860,11 @@ Full metadata and message of one commit.
 {
   "author": {"email": "ada@example.com", "name": "Ada Lovelace", "offset": 0, "time": 1791101700},
   "committer": {"email": "ada@example.com", "name": "Ada Lovelace", "offset": 0, "time": 1791101700},
-  "id": "5460c0a41263705620de40e2acd9d7b31636428e",
+  "id": "3b89450e665e1e0fd5b047fd2c0b16eb6b347ee1",
   "message": "Document usage\n\nFixes #12\n",
-  "parents": ["80379d391035439ec71fe40214a153757e0e3eb6"],
+  "parents": ["f0a71a147bd95c9f0fbe416c1fe72053307ddf61"],
   "summary": "Document usage",
-  "tree": "3ec23fc7aeb809ce56d56bce3ccf9f45da2b2997"
+  "tree": "7fde08b287f99ef322dfdad78e37e56b75c22888"
 }
 ```
 
@@ -914,19 +908,19 @@ A path that never existed returns an empty list, not an error.
     {
       "author": {"email": "ada@example.com", "name": "Ada Lovelace", "offset": 0, "time": 1790937000},
       "change": "modified",
-      "id": "80379d391035439ec71fe40214a153757e0e3eb6",
-      "parents": ["d2578063e29599512e369efc4c2130f7d6859624"],
+      "id": "f0a71a147bd95c9f0fbe416c1fe72053307ddf61",
+      "parents": ["810ac4d2c6edff3411f0ce5087c05bcfab9007cf"],
       "path": "src/lib.rs",
-      "short_id": "80379d3",
+      "short_id": "f0a71a1",
       "summary": "Add shout"
     },
     {
       "author": {"email": "ada@example.com", "name": "Ada Lovelace", "offset": 0, "time": 1790845200},
       "change": "added",
-      "id": "d2578063e29599512e369efc4c2130f7d6859624",
+      "id": "810ac4d2c6edff3411f0ce5087c05bcfab9007cf",
       "parents": [],
       "path": "src/lib.rs",
-      "short_id": "d257806",
+      "short_id": "810ac4d",
       "summary": "Initial commit"
     }
   ],
@@ -971,9 +965,9 @@ Find commits by message, author, date and changed path. Every filter you pass mu
   "commits": [
     {
       "author": {"email": "ada@example.com", "name": "Ada Lovelace", "offset": 0, "time": 1791101700},
-      "id": "5460c0a41263705620de40e2acd9d7b31636428e",
-      "parents": ["80379d391035439ec71fe40214a153757e0e3eb6"],
-      "short_id": "5460c0a",
+      "id": "3b89450e665e1e0fd5b047fd2c0b16eb6b347ee1",
+      "parents": ["f0a71a147bd95c9f0fbe416c1fe72053307ddf61"],
+      "short_id": "3b89450",
       "summary": "Document usage"
     }
   ],
@@ -1014,7 +1008,7 @@ Notes attached to a commit or another object, like `git notes show`. Notes are t
 
 ```json
 {
-  "id": "67de0e9d5f784a1b2225dc65fef33f49b8a942d0",
+  "id": "3b89450e665e1e0fd5b047fd2c0b16eb6b347ee1",
   "notes": [
     {
       "note_id": "6127b25d6086a22684f64503d9e7f8f921f4e7fb",

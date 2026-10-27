@@ -32,7 +32,7 @@ The server has 13 read-only tools. 77 unit tests and the end-to-end smoke test p
 ```
 src/
 ├─ main.rs          CLI args (clap), logging to stderr, stdio transport
-├─ server.rs        #[tool_router] — thin async wrappers + ServerHandler metadata
+├─ server/          ServerHandler metadata (mod.rs) + one #[tool_router] of thin async wrappers per area
 ├─ repo.rs          RepoHandle: ThreadSafeRepository + spawn_blocking bridge
 └─ tools/
    ├─ mod.rs        shared output types (Signature, LogEntry, ChangeKind), arg helpers, test fixtures
@@ -48,10 +48,10 @@ src/
 
 Conventions for every new tool:
 - **Logic.** A sync `fn(&gix::Repository, Args) -> anyhow::Result<Out>` in `tools/<area>.rs`, with `Args: Deserialize + JsonSchema` and `Out: Serialize + JsonSchema`. Doc comments on the fields become the schema descriptions the model reads.
-- **Wrapper.** A three-line wrapper in `server.rs`, annotated with `read_only_hint`, `destructive_hint` and `idempotent_hint` as applicable.
+- **Wrapper.** A three-line wrapper in the area's `server/<area>.rs` router, annotated with `read_only_hint`, `destructive_hint` and `idempotent_hint` as applicable.
 - **Tests.** Unit tests in the same file against `testutil::fixture_repo()`. When output must match git, compare against the `git` CLI.
 
-When `server.rs` gets crowded (around Phase 2), split it into one `#[tool_router(router = …)]` block per area and combine them with `+`.
+`server.rs` was split at the start of Phase 2 into `server/<area>.rs` files, each with one `#[tool_router(router = <area>_router)]` block; `GitServer::new` combines them with `+`.
 
 ---
 

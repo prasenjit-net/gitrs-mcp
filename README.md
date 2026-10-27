@@ -112,7 +112,7 @@ Contributor rules (code quality, MCP documentation, testing and the pre-commit c
 ```
 src/
 ├─ main.rs          CLI arguments, logging, stdio transport
-├─ server.rs        MCP tool registration (thin async wrappers)
+├─ server/          MCP tool registration: thin async wrappers, one router per area
 ├─ repo.rs          Thread-safe repo handle; runs gix calls on the blocking pool
 └─ tools/           Git logic as plain sync functions over &gix::Repository
    ├─ mod.rs        shared types and helpers, test fixtures

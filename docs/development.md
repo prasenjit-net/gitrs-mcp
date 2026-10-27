@@ -73,7 +73,7 @@ A tool is one function and one wrapper. Using a made-up `describe` tool as the e
 
 3. **Write the function.** It takes `&gix::Repository` and the args, and returns `anyhow::Result<DescribeResult>`. Return errors with `?` and `anyhow::Context`, never `unwrap()`. Write error messages that say what was wrong and how to fix it. Lists need `limit` and `truncated`; content needs a byte budget.
 
-4. **Add the wrapper** in `server.rs`. Its doc comment becomes the tool description, so say what the tool does, when to use it, and its key defaults or limits. Set a `title` and the correct hints: `read_only_hint = true` for reads, and `destructive_hint` / `idempotent_hint` for writes. Write tools must only be registered when `--allow-write` is set.
+4. **Add the wrapper** to the router in `server/<area>.rs` that matches the tool's area (a new area gets its own file, and its router is added to the sum in `GitServer::new`). Its doc comment becomes the tool description, so say what the tool does, when to use it, and its key defaults or limits. Set a `title` and the correct hints: `read_only_hint = true` for reads, and `destructive_hint` / `idempotent_hint` for writes. Write tools must only be registered when `--allow-write` is set.
 
    ```rust
    /// Name a commit relative to the nearest tag, like `git describe`. ...
@@ -111,7 +111,7 @@ Every tool has unit tests in its own file, in a `#[cfg(test)] mod tests` block. 
 
 ## Coverage
 
-`make coverage` fails below 80% line coverage. New code in `src/tools/` should be at or near full coverage, and coverage must not drop. `main.rs`, `server.rs` and `repo.rs` are exercised by `make smoke`, not by unit tests, so they show as uncovered there. Use `make coverage-html` to see which lines a change left untested.
+`make coverage` fails below 80% line coverage. New code in `src/tools/` should be at or near full coverage, and coverage must not drop. `main.rs`, `server/` and `repo.rs` are exercised by `make smoke`, not by unit tests, so they show as uncovered there. Use `make coverage-html` to see which lines a change left untested.
 
 ## Before committing
 

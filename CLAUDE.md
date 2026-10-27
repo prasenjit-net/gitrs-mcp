@@ -10,7 +10,7 @@ gitrs-mcp is a local-only Git MCP server in Rust, built on `gix` (gitoxide) and 
   - Shared argument handling such as rev defaults, pagination and byte budgets gets one helper, used everywhere.
   - Test fixtures and git-oracle helpers live in `tools::testutil`. Don't create a second fixture builder.
 - **Design principles.**
-  - *Single responsibility, by layer.* `main.rs` handles CLI and transport. `server.rs` handles MCP registration only: thin wrappers with no git logic. `repo.rs` bridges sync gix calls to async. `tools/<area>.rs` holds git logic as plain sync functions over `&gix::Repository`.
+  - *Single responsibility, by layer.* `main.rs` handles CLI and transport. `server/` handles MCP registration only: thin wrappers with no git logic, one router per area. `repo.rs` bridges sync gix calls to async. `tools/<area>.rs` holds git logic as plain sync functions over `&gix::Repository`.
   - *Dependency direction.* `tools` never imports `rmcp` or `server`, and `server` never touches gix internals directly.
   - *Open/closed.* Add a tool by adding a function and a wrapper. Don't edit unrelated tools.
   - *Explicit over clever.* Use typed args/result structs, not `serde_json::Value`. No `unwrap()`/`expect()` outside tests. Propagate errors with `?` and `anyhow::Context`.

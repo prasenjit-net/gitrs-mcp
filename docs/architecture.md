@@ -7,7 +7,11 @@ gitrs-mcp is a single binary that serves one Git repository to an MCP client ove
 ```
 src/
 ├─ main.rs          CLI arguments, logging to stderr, stdio transport
-├─ server.rs        MCP surface: one thin #[tool] wrapper per tool, server metadata
+├─ server/          MCP surface: server metadata (mod.rs) and one #[tool_router] per area
+│  ├─ repo.rs       repository, refs and revisions
+│  ├─ changes.rs    working tree and index
+│  ├─ files.rs      file contents and blame
+│  └─ history.rs    commit history
 ├─ repo.rs          RepoHandle: opens the repository, runs gix calls on the blocking pool
 └─ tools/           Git logic, as plain synchronous functions over &gix::Repository
    ├─ mod.rs        shared types and helpers (Signature, LogEntry, ChangeKind, pagination, paths), test fixtures
@@ -26,7 +30,7 @@ Each layer has one job, and dependencies only point downward:
 | Layer | Owns | Must not |
 |---|---|---|
 | `main.rs` | Argument parsing, logging setup, starting the stdio transport | Contain tool logic |
-| `server.rs` | Registering tools with rmcp, their titles and annotations, server instructions | Touch gix internals |
+| `server/` | Registering tools with rmcp, their titles and annotations, server instructions | Touch gix internals |
 | `repo.rs` | Opening the repository and bridging sync gix calls into async rmcp handlers | Know about individual tools |
 | `tools/` | All Git behaviour, plus the argument and result types that become JSON Schemas | Import `rmcp` or `server` |
 
@@ -36,12 +40,12 @@ Because `tools/` doesn't depend on MCP at all, every tool is an ordinary functio
 
 1. The client sends `tools/call` with a tool name and JSON arguments.
 2. rmcp deserializes the arguments into the tool's `Args` struct. A malformed request (wrong type, missing required field) is rejected here, before any Git code runs.
-3. The `#[tool]` wrapper in `server.rs` passes a closure to `RepoHandle::run`.
+3. The `#[tool]` wrapper in `server/<area>.rs` passes a closure to `RepoHandle::run`.
 4. `RepoHandle::run` moves the closure to tokio's blocking thread pool, gets a thread-local `gix::Repository`, and calls the tool function.
 5. The tool returns `Ok(Out)` or an `anyhow::Error`. A success becomes `structuredContent` (and a text copy) through rmcp's `Json<T>` wrapper. An error is formatted with its full context chain and returned as a tool error (`isError: true`), so the model can read it and retry. Protocol-level errors are reserved for server bugs.
 
 ```
-client ──tools/call──▶ rmcp ──Args──▶ server.rs wrapper ──closure──▶ RepoHandle::run
+client ──tools/call──▶ rmcp ──Args──▶ server wrapper ──closure──▶ RepoHandle::run
                                                                         │ spawn_blocking
                                                                         ▼
 client ◀──result───── rmcp ◀──Json<Out> / Err(String)────── tools::<area>::<tool>(&repo, args)

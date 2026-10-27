@@ -10,13 +10,13 @@ _Last updated 2026-10-27._
 |---|---|
 | 0 Scaffold | ✅ Done: 4 tools |
 | 1 Core read | ✅ Done: 9 tools, each checked against the git CLI |
-| 2 Deep read and inspection | 🚧 In progress: 5 of 14 tools |
+| 2 Deep read and inspection | 🚧 In progress: 6 of 14 tools |
 | 3 Safe writes | Planned |
 | 4 History rewriting | Planned |
 | 5 MCP-native extras | Planned |
 | 6 Hardening and release | Planned |
 
-The server has 18 read-only tools. 97 unit tests and the end-to-end smoke test pass, with 94.7% line coverage. `--allow-write` is accepted but registers nothing until Phase 3.
+The server has 19 read-only tools. 105 unit tests and the end-to-end smoke test pass, with 94.8% line coverage. `--allow-write` is accepted but registers nothing until Phase 3.
 
 ## Design principles
 
@@ -44,6 +44,7 @@ src/
    ├─ status.rs     status
    ├─ diff.rs       diff (and the tree↔index comparison status reuses)
    ├─ files.rs      read_file, list_tree
+   ├─ grep.rs       grep
    ├─ blame.rs      blame
    └─ history.rs    log, show_commit, file_history, search_commits
 ```
@@ -161,7 +162,7 @@ All nine tools shipped, each tested against the git CLI (`git status --porcelain
 
 | Tool | In → Out | gix |
 |---|---|---|
-| `grep` | `pattern` (regex), `rev \| worktree`, `pathspec`, `ignore_case`, `limit` → `matches[] {path, line, text}` | tree traversal + blob read; worktree via `dirwalk` honoring excludes |
+| `grep` ✅ | `pattern` (regex), `rev \| worktree`, `pathspec`, `ignore_case`, `limit` → `matches[] {path, line, text}` | tree traversal + blob read; worktree via `dirwalk` honoring excludes |
 | `describe` ✅ | `rev` → `v1.2-3-gabc123` + parts | `commit.describe()` |
 | `show_tag` ✅ | `name` → tagger, message, target, kind | `find_reference` then `peel` |
 | `reflog` ✅ | `ref = HEAD`, `limit` → entries `{old, new, committer, message}` | `reference.log_iter()` |
@@ -187,6 +188,10 @@ All nine tools shipped, each tested against the git CLI (`git status --porcelain
 - **`show_tag`.** Added `peeled`/`peeled_type` (the object after peeling every tag layer) and `signed`. Signatures are detected, not verified.
 - **`reflog`.** Each entry has a `selector` (`main@{2}`) that other tools accept as a revision. `old_id` is `null` for the entry that created the ref. Added `skip`.
 - **`list_stashes`.** Each stash reports its `base` commit, `branch` (parsed from the message), `includes_untracked`, and a `selector`. Paginated with `limit`/`skip`.
+- **`grep`.**
+  - Searches tracked files only, like `git grep` without `--untracked`, reading them from disk; `index` searches staged content. The planned `dirwalk` over untracked files wasn't needed for that.
+  - Skips binary files, symlinks and submodules like `git grep -I`. Each match reports a byte `column` (`--column`), and its `text` is cut at 512 bytes.
+  - Added `fixed_strings` and `skip`. Patterns use Rust regex syntax rather than git's POSIX basic regex.
 - **`notes`.** Added `ref` (a notes ref, expanded like `git notes --ref`) and `max_bytes`. `rev` isn't peeled, so a tag's notes are those on the tag object, as in `git notes show`.
 
 ---
@@ -286,7 +291,7 @@ gix has no sequencer, so this phase is where we build our own logic on its primi
 |---|---|---|---|
 | 0 Scaffold | 4 | — | ✅ done |
 | 1 Core read | 9 | ~4.9k lines including tests (planned ~2–3k) | ✅ done |
-| 2 Deep read | 14 | ~2k LOC | 🚧 5 of 14 |
+| 2 Deep read | 14 | ~2k LOC | 🚧 6 of 14 |
 | 3 Safe writes | 10 | ~2–3k LOC (index writing and checkout safety are the hard parts) | planned |
 | 4 Rewriting | 8 | ~3–4k LOC (sequencer and stash) | planned |
 | 5 MCP extras | resources, prompts, progress, multi-repo | ~1.5k LOC | planned |

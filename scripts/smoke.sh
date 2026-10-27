@@ -36,8 +36,9 @@ requests=(
   "$(call 18 reflog '{"limit":3}')"
   "$(call 19 list_stashes '{"limit":3}')"
   "$(call 20 notes '{}')"
+  "$(call 21 grep '{"pattern":"\\w","limit":3}')"
 )
-last_id=20
+last_id=21
 expect_error='17' # space-separated request ids that must return a tool error
 
 # Keep stdin open briefly so the server can answer before seeing EOF.

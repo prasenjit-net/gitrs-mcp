@@ -10,7 +10,7 @@ src/
 ├─ server/          MCP surface: server metadata (mod.rs) and one #[tool_router] per area
 │  ├─ repo.rs       repository, refs, tags, reflogs and revisions
 │  ├─ changes.rs    working tree and index
-│  ├─ files.rs      file contents and blame
+│  ├─ files.rs      file contents, search and blame
 │  └─ history.rs    commit history and notes
 ├─ repo.rs          RepoHandle: opens the repository, runs gix calls on the blocking pool
 └─ tools/           Git logic, as plain synchronous functions over &gix::Repository
@@ -23,6 +23,7 @@ src/
    ├─ status.rs     status
    ├─ diff.rs       diff, plus the tree/index comparison that status reuses
    ├─ files.rs      read_file, list_tree
+   ├─ grep.rs       grep
    ├─ blame.rs      blame
    └─ history.rs    log, show_commit, file_history, search_commits
 ```
@@ -84,6 +85,6 @@ Results are meant to match the `git` CLI on the same repository, and the tests c
 
 - **Local only, by construction.** gix is compiled without any network transport feature, so fetch, push, clone and `ls-remote` can't be reached from any code path. `status.upstream` reports the configured upstream from local config only; nothing is ever fetched.
 - **Read-only.** Every current tool is read-only and annotated with `readOnlyHint`. The `--allow-write` flag is reserved for the write tools planned in Phase 3 of the [roadmap](../ROADMAP.md). Those tools will only be registered when the flag is given, so without it the model never sees them.
-- **Filesystem reads stay inside the repository.** Reads from the working tree (`read_file` with `rev: "worktree"`) refuse anything under `.git/` and any path whose parent directory resolves outside the repository through a symlink. A symlink itself is reported by its target, as git stores it, and never followed.
+- **Filesystem reads stay inside the repository.** Reads from the working tree (`read_file` with `rev: "worktree"`, and `grep`, which skips such paths) refuse anything under `.git/` and any path whose parent directory resolves outside the repository through a symlink. A symlink itself is reported by its target, as git stores it, and never followed.
 - **Bounded output.** Every list is paginated and every content field has a byte budget, so a single call can't flood the client's context.
 - **Errors for the model, not crashes.** Tool code returns errors instead of panicking (`unwrap` and `expect` are only allowed in tests), and every error message says what to change.

@@ -22,8 +22,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    ChangeKind, byte_budget, index_entry_kind, page_limit, pathspec_patterns, resolve_commit,
-    resolve_tree, short_hex,
+    ChangeKind, byte_budget, index_entry_kind, page_limit, pathspec_patterns, pathspec_search,
+    resolve_commit, resolve_tree, short_hex,
 };
 
 const DEFAULT_DIFF_LIMIT: usize = 100;
@@ -202,7 +202,7 @@ fn between_revisions(
     let old = resolve_tree(repo, Some(from))?;
     let new = resolve_tree(repo, Some(to))?;
     let index = repo.index_or_empty()?;
-    let mut spec = make_pathspec(repo, pathspec, &index)?;
+    let mut spec = pathspec_search(repo, pathspec, &index)?;
     let mut changes: Vec<_> = repo
         .diff_tree_to_tree(&old, &new, None)?
         .into_iter()
@@ -252,7 +252,7 @@ pub fn index_changes(
 ) -> anyhow::Result<(Vec<FileChange>, Vec<String>)> {
     let index = repo.index_or_empty()?;
     let unmerged = unmerged_paths(&index);
-    let mut spec = make_pathspec(repo, pathspec, &index)?;
+    let mut spec = pathspec_search(repo, pathspec, &index)?;
     let mut changes = Vec::new();
     repo.tree_index_status(
         tree,
@@ -458,24 +458,6 @@ fn require_worktree(repo: &gix::Repository) -> anyhow::Result<()> {
         );
     }
     Ok(())
-}
-
-/// A pathspec search, or `None` to include everything.
-fn make_pathspec<'repo>(
-    repo: &'repo gix::Repository,
-    pathspec: &[String],
-    index: &gix::index::State,
-) -> anyhow::Result<Option<gix::Pathspec<'repo>>> {
-    if pathspec.is_empty() {
-        return Ok(None);
-    }
-    Ok(Some(repo.pathspec(
-        false,
-        pathspec_patterns(pathspec),
-        true,
-        index,
-        gix::worktree::stack::state::attributes::Source::IdMapping,
-    )?))
 }
 
 fn unmerged_paths(index: &gix::index::State) -> Vec<String> {

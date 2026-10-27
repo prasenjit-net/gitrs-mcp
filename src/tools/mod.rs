@@ -7,6 +7,7 @@
 pub mod blame;
 pub mod diff;
 pub mod files;
+pub mod grep;
 pub mod history;
 pub mod notes;
 pub mod reflog;
@@ -24,6 +25,8 @@ use serde::Serialize;
 pub const DEFAULT_MAX_BYTES: usize = 64 * 1024;
 /// Upper bound for a caller-supplied `max_bytes`.
 pub const MAX_MAX_BYTES: usize = 1024 * 1024;
+/// Git calls content binary if a NUL byte appears in its first 8000 bytes.
+const BINARY_SNIFF_LEN: usize = 8000;
 
 /// A person + timestamp, as recorded in a commit or tag.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -274,6 +277,29 @@ pub fn repo_file_path(path: &str) -> anyhow::Result<BString> {
 /// They're relative to the repository root because the server runs from there (see `RepoHandle::discover`).
 pub fn pathspec_patterns(pathspec: &[String]) -> Vec<BString> {
     pathspec.iter().map(|p| BString::from(p.as_str())).collect()
+}
+
+/// A pathspec search over `pathspec`, or `None` to include everything.
+pub fn pathspec_search<'repo>(
+    repo: &'repo gix::Repository,
+    pathspec: &[String],
+    index: &gix::index::State,
+) -> anyhow::Result<Option<gix::Pathspec<'repo>>> {
+    if pathspec.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(repo.pathspec(
+        false,
+        pathspec_patterns(pathspec),
+        true,
+        index,
+        gix::worktree::stack::state::attributes::Source::IdMapping,
+    )?))
+}
+
+/// Whether `data` is binary by git's rule: a NUL byte in the first 8000 bytes.
+pub fn is_binary(data: &[u8]) -> bool {
+    data[..data.len().min(BINARY_SNIFF_LEN)].contains(&0)
 }
 
 /// The tree-entry kind (file, executable, symlink, submodule) an index entry mode stands for.

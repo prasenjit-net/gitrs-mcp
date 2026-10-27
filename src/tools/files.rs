@@ -6,12 +6,12 @@ use gix::{bstr::BStr, index::entry::Stage, object::tree::EntryKind};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::{byte_budget, index_entry_kind, page_limit, repo_file_path, repo_path, resolve_tree};
+use super::{
+    byte_budget, index_entry_kind, is_binary, page_limit, repo_file_path, repo_path, resolve_tree,
+};
 
 const DEFAULT_TREE_LIMIT: usize = 500;
 const MAX_TREE_LIMIT: usize = 5000;
-/// Git calls a file binary if a NUL byte appears in its first 8000 bytes.
-const BINARY_SNIFF_LEN: usize = 8000;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ReadFileArgs {
@@ -72,9 +72,8 @@ pub fn read_file(repo: &gix::Repository, args: ReadFileArgs) -> anyhow::Result<R
         );
     }
     let end = size.min(offset.saturating_add(byte_budget(args.max_bytes)));
-    let sniff = &file.data[..size.min(BINARY_SNIFF_LEN)];
     let (content, base64, end) = match text_range(&file.data[offset..end], end < size) {
-        Some(text) if !sniff.contains(&0) => (Some(text.to_owned()), None, offset + text.len()),
+        Some(text) if !is_binary(&file.data) => (Some(text.to_owned()), None, offset + text.len()),
         _ => (
             None,
             Some(base64::engine::general_purpose::STANDARD.encode(&file.data[offset..end])),
@@ -208,7 +207,7 @@ fn worktree_file_kind(_meta: &std::fs::Metadata) -> EntryKind {
 }
 
 /// `path` under the worktree, refusing `.git` internals and parents that are symlinks leading outside.
-fn worktree_path(workdir: &Path, path: &BStr) -> anyhow::Result<PathBuf> {
+pub fn worktree_path(workdir: &Path, path: &BStr) -> anyhow::Result<PathBuf> {
     if path.split(|b| *b == b'/').next() == Some(b".git".as_slice()) {
         bail!("`{path}` is inside `.git`; read repository data through the other tools instead");
     }
@@ -295,10 +294,10 @@ pub struct ListTreeResult {
 }
 
 /// An entry found while listing, before its size is looked up.
-struct Listed {
-    path: gix::bstr::BString,
-    kind: EntryKind,
-    id: gix::ObjectId,
+pub struct Listed {
+    pub path: gix::bstr::BString,
+    pub kind: EntryKind,
+    pub id: gix::ObjectId,
 }
 
 pub fn list_tree(repo: &gix::Repository, args: ListTreeArgs) -> anyhow::Result<ListTreeResult> {
@@ -338,7 +337,7 @@ pub fn list_tree(repo: &gix::Repository, args: ListTreeArgs) -> anyhow::Result<L
 }
 
 /// Children of `tree` with paths prefixed by `prefix`; with `recursive`, every non-tree entry below it.
-fn list_children(
+pub fn list_children(
     tree: &gix::Tree<'_>,
     prefix: &BStr,
     recursive: bool,

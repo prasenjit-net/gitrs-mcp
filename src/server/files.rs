@@ -51,4 +51,19 @@ impl GitServer {
             .await
             .map(Json)
     }
+
+    /// Search file contents for a regex, like `git grep`: tracked files in the working tree by default,
+    /// or the index (`rev: "index"`) or any revision. Returns path, line, column and the line's text,
+    /// ordered by path. Skips binary files, symlinks and untracked files. Narrow with `pathspec`;
+    /// paginated (`limit`, default 100).
+    #[tool(annotations(title = "Grep", read_only_hint = true))]
+    async fn grep(
+        &self,
+        Parameters(args): Parameters<tools::grep::GrepArgs>,
+    ) -> Result<Json<tools::grep::GrepResult>, String> {
+        self.repo
+            .run(move |r| tools::grep::grep(r, args))
+            .await
+            .map(Json)
+    }
 }

@@ -1,12 +1,12 @@
 # Tool reference
 
-gitrs-mcp exposes 18 read-only tools. This page covers each one: what it does, its arguments and defaults, the fields it returns, the errors it reports, and a real request and response.
+gitrs-mcp exposes 19 read-only tools. This page covers each one: what it does, its arguments and defaults, the fields it returns, the errors it reports, and a real request and response.
 
 - [Conventions](#conventions)
 - [Shared types](#shared-types)
 - Repository and refs: [`repo_info`](#repo_info), [`list_refs`](#list_refs), [`rev_parse`](#rev_parse), [`compare_refs`](#compare_refs), [`describe`](#describe), [`show_tag`](#show_tag), [`reflog`](#reflog), [`list_stashes`](#list_stashes)
 - Local changes: [`status`](#status), [`diff`](#diff)
-- Files: [`read_file`](#read_file), [`list_tree`](#list_tree), [`blame`](#blame)
+- Files: [`read_file`](#read_file), [`list_tree`](#list_tree), [`blame`](#blame), [`grep`](#grep)
 - History: [`log`](#log), [`show_commit`](#show_commit), [`file_history`](#file_history), [`search_commits`](#search_commits), [`notes`](#notes)
 
 ## Conventions
@@ -16,7 +16,7 @@ These rules hold for every tool.
 - **Revisions** accept anything `git rev-parse` does: full or abbreviated SHAs, branch and tag names, `HEAD~2`, `v1.0^{tree}`, `main@{1}`, `:/message text`. Annotated tags are peeled to the commit they point at when a commit is needed.
 - **Paths and pathspecs** are relative to the repository root, whatever directory the server was started from. Paths may not be absolute or contain `..`. Pathspec arguments accept git's pathspec syntax, including globs (`*.rs`) and magic such as `:(exclude)docs`.
 - **Lists are paginated.** List tools take `limit` (and usually `skip`) and return `truncated: true` when more items exist. The default and maximum `limit` differ per tool and are listed below.
-- **Large content has a byte budget.** `read_file` and `diff` with `format: "patch"` return at most `max_bytes` (default 65536, at most 1048576) and say when they stopped early.
+- **Large content has a byte budget.** `read_file`, `notes` and `diff` with `format: "patch"` return at most `max_bytes` (default 65536, at most 1048576) and say when they stopped early. `grep` cuts each matching line at 512 bytes.
 - **Errors are tool errors.** Bad input, such as an unknown revision, a missing path or an invalid range, comes back as a tool result with `isError: true`. The message says what was wrong and how to fix it, for example:
 
   ```
@@ -777,6 +777,88 @@ Which commit last changed each line of a file at a revision, following renames l
 ```
 
 ---
+
+## `grep`
+
+Search file contents for a regular expression, like `git grep`. By default it searches tracked files as they are in the working tree, including unstaged edits; it can also search the index or any revision. Results are ordered by path, then line.
+
+Like `git grep -I`, it skips binary files (a NUL byte in the first 8000 bytes), symlinks, submodules and untracked files, and in the working tree it skips tracked files that were deleted.
+
+**Arguments**
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `pattern` | string | required | Regular expression matched against each line, in Rust [`regex`](https://docs.rs/regex/latest/regex/#syntax) syntax: Perl-like classes and flags (`\d`, `\b`, `(?i)`, `a\|b`), but no backreferences or lookaround. |
+| `rev` | string | `worktree` | What to search: `worktree` for tracked files on disk (`git grep`), `index` for staged content (`git grep --cached`), or a revision such as `HEAD` or `v1.0` (`git grep <pattern> <rev>`). A bare repository defaults to `HEAD`. |
+| `pathspec` | string[] | `[]` (everything) | Limit to these paths or pathspec patterns, e.g. `src/`, `*.rs`, `:(exclude)tests`. |
+| `ignore_case` | boolean | `false` | Match regardless of case (`-i`). |
+| `fixed_strings` | boolean | `false` | Treat `pattern` as literal text, not a regex (`-F`). |
+| `limit` | integer | 100 (max 1000) | Maximum matching lines to return. |
+| `skip` | integer | 0 | Matching lines to skip first, for pagination. |
+
+**Result**
+
+| Field | Type | Description |
+|---|---|---|
+| `rev` | string \| null | Full SHA of the commit or tree that was searched; `null` for the worktree or index. |
+| `matches[]` | array | Matching lines, ordered by path and then line number. |
+| `matches[].path` | string | Path relative to the repository root. |
+| `matches[].line` | integer | 1-based line number. |
+| `matches[].column` | integer | 1-based byte offset where the first match on the line starts, like `git grep --column`. |
+| `matches[].text` | string | The line without its terminator, cut at 512 bytes. Invalid UTF-8 is replaced with U+FFFD. |
+| `matches[].text_truncated` | boolean | True if `text` was cut at 512 bytes. |
+| `truncated` | boolean | True if more matches exist past this page; continue with `skip`. |
+
+**Errors:** an invalid regex (the message suggests `fixed_strings`); an unknown revision, or one that isn't a commit or tree; `worktree` or `index` in a bare repository.
+
+**Examples**
+
+```json
+{"pattern": "greet"}
+```
+
+```json
+{
+  "matches": [
+    {"column": 3, "line": 1, "path": "README.md", "text": "# greet", "text_truncated": false},
+    {"column": 8, "line": 3, "path": "README.md", "text": "A tiny greeting library.", "text_truncated": false},
+    {"column": 10, "line": 8, "path": "README.md", "text": "let hi = greet::greet(\"Ada\");", "text_truncated": false},
+    {"column": 8, "line": 1, "path": "src/lib.rs", "text": "pub fn greet(name: &str) -> String {", "text_truncated": false},
+    {"column": 5, "line": 6, "path": "src/lib.rs", "text": "    greet(name).to_uppercase()", "text_truncated": false},
+    {"column": 20, "line": 2, "path": "src/main.rs", "text": "    println!(\"{}\", greet::greet(\"world\"));", "text_truncated": false}
+  ],
+  "rev": null,
+  "truncated": false
+}
+```
+
+```json
+{"pattern": "fn \\w+\\(name", "rev": "feature", "pathspec": ["src/"], "limit": 2}
+```
+
+```json
+{
+  "matches": [
+    {"column": 5, "line": 1, "path": "src/farewell.rs", "text": "pub fn farewell(name: &str) -> String {", "text_truncated": false},
+    {"column": 5, "line": 1, "path": "src/lib.rs", "text": "pub fn greet(name: &str) -> String {", "text_truncated": false}
+  ],
+  "rev": "d40a8e167790c5a3b37bfd4647520dd04b1bd80f",
+  "truncated": true
+}
+```
+
+An invalid regex:
+
+```json
+{"pattern": "greet(", "rev": "v0.1.0"}
+```
+
+```
+`pattern` isn't a valid regex; fix it, or set `fixed_strings: true` to search for `greet(` literally: regex parse error:
+    greet(
+         ^
+error: unclosed group
+```
 
 ## `log`
 

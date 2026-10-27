@@ -89,7 +89,7 @@ mod tests {
     use super::*;
     use crate::tools::testutil::fixture_repo;
 
-    const WRITE_TOOLS: [&str; 10] = [
+    const WRITE_TOOLS: [&str; 11] = [
         "create_branch",
         "delete_branch",
         "rename_branch",
@@ -100,6 +100,7 @@ mod tests {
         "reset",
         "restore",
         "switch",
+        "clean",
     ];
 
     fn server(path: &std::path::Path, allow_write: bool) -> GitServer {
@@ -137,7 +138,10 @@ mod tests {
             let destructive = tool.annotations.as_ref().and_then(|a| a.destructive_hint);
             assert_eq!(
                 destructive,
-                Some(matches!(name, "delete_branch" | "restore")),
+                Some(matches!(
+                    name,
+                    "delete_branch" | "restore" | "reset" | "clean"
+                )),
                 "{name}"
             );
         }

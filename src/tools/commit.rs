@@ -14,12 +14,13 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     LogEntry,
+    checkout::{RestoreRequest, RestoredFile, apply_restore, plan_restore, summarize},
     diff::index_changes,
     index_entry_kind, resolve_commit,
     staging::reset_entries,
     write::{
-        clean_message, committer, ensure_idle, hold_index_lock, refuse_signing, require_worktree,
-        update_index,
+        append_reflog, clean_message, committer, ensure_idle, hold_index_lock, refuse_signing,
+        require_worktree, update_index,
     },
 };
 
@@ -253,6 +254,10 @@ pub enum ResetMode {
     /// so the changes show up as unstaged (the default, like `git reset`).
     #[default]
     Mixed,
+    /// Move the branch and make the index and working tree match the target commit, discarding
+    /// uncommitted changes to tracked files (untracked files are kept unless one is in the way).
+    /// A dry run unless `dry_run: false`.
+    Hard,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -260,9 +265,12 @@ pub struct ResetArgs {
     /// Commit to move the current branch (or detached HEAD) to, e.g. `HEAD~1` or a SHA (default `HEAD`,
     /// which with `mixed` just unstages everything).
     pub rev: Option<String>,
-    /// `soft` or `mixed` (default). `hard`, which also overwrites the working tree, isn't available.
+    /// `soft`, `mixed` (default) or `hard`.
     #[serde(default)]
     pub mode: ResetMode,
+    /// For `hard`: only report which files would change and which local changes would be lost
+    /// (default true). Set `false` to reset. `soft` and `mixed` always apply.
+    pub dry_run: Option<bool>,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -271,16 +279,26 @@ pub struct ResetResult {
     pub mode: ResetMode,
     /// Full SHA HEAD pointed to before. To undo, reset to it; it also stays in the reflog.
     pub previous: String,
-    /// Full SHA HEAD points to now.
+    /// Full SHA HEAD points to now; on a dry run, where it would point.
     pub head: String,
     /// Short name of the branch that moved; `null` when HEAD is detached.
     pub branch: Option<String>,
-    /// Number of paths that now differ between HEAD and the index (staged changes).
+    /// Number of paths that now differ between HEAD and the index (staged changes). On a dry run,
+    /// the current number.
     pub staged_total: usize,
+    /// True when nothing was changed because this was a `hard` dry run.
+    pub dry_run: bool,
+    /// For `hard`: the files whose working-tree or index version changes, ordered by path (at most
+    /// 500), each flagged when uncommitted content is lost. Empty for `soft` and `mixed`.
+    pub files: Vec<RestoredFile>,
+    /// For `hard`: the number of changed files, including any beyond the listed 500.
+    pub files_count: usize,
+    /// For `hard`: true when any uncommitted content is (or would be) lost.
+    pub discards_changes: bool,
 }
 
-/// Move the current branch to another commit, like `git reset --soft` or `--mixed`. The working
-/// tree is never touched.
+/// Move the current branch to another commit, like `git reset --soft`, `--mixed` or `--hard`. Only
+/// `hard` touches the working tree, and it's a dry run unless asked otherwise.
 pub fn reset(repo: &gix::Repository, args: ResetArgs) -> anyhow::Result<ResetResult> {
     ensure_idle(repo, "reset")?;
     let rev = args.rev.as_deref().unwrap_or("HEAD");
@@ -293,22 +311,43 @@ pub fn reset(repo: &gix::Repository, args: ResetArgs) -> anyhow::Result<ResetRes
     let target_tree = target.tree_id()?.detach();
     let target = target.id;
     let branch = repo.head_name()?.map(|name| name.shorten().to_string());
+    let message = format!("reset: moving to {rev}");
     let move_head = || -> anyhow::Result<()> {
+        if target == previous {
+            // gix skips an update that leaves the ref in place, but git still logs it.
+            append_reflog(repo, "HEAD", Some(previous), target, &message)?;
+            if let Some(name) = repo.head_name()? {
+                append_reflog(
+                    repo,
+                    &name.as_bstr().to_string(),
+                    Some(previous),
+                    target,
+                    &message,
+                )?;
+            }
+            return Ok(());
+        }
         repo.edit_reference(
             RefEdit::update(
                 "HEAD".try_into()?,
                 target,
                 PreviousValue::MustExistAndMatch(Target::Object(previous)),
-                format!("reset: moving to {rev}"),
+                message.as_str(),
             )
             .with_deref(true),
         )?;
         Ok(())
     };
-    if args.mode == ResetMode::Mixed {
-        require_worktree(repo, "reset the index")?;
+    let workdir = match args.mode {
+        ResetMode::Soft => None,
+        ResetMode::Mixed => Some(require_worktree(repo, "reset the index")?),
+        ResetMode::Hard => Some(require_worktree(repo, "reset the working tree")?),
+    };
+    let dry_run = args.mode == ResetMode::Hard && args.dry_run.unwrap_or(true);
+    let mut hard = None;
+    if !dry_run {
+        committer(repo)?;
     }
-    committer(repo)?;
     match args.mode {
         ResetMode::Soft => {
             let index = repo.index_or_empty()?;
@@ -330,14 +369,47 @@ pub fn reset(repo: &gix::Repository, args: ResetArgs) -> anyhow::Result<ResetRes
                 move_head()
             })?;
         }
+        ResetMode::Hard => {
+            let workdir = workdir.context("hard resets have a working tree")?;
+            let everything = [".".to_owned()];
+            let target_hex = target.to_string();
+            let request = RestoreRequest {
+                paths: &everything,
+                source: &target_hex,
+                staged: true,
+                worktree: true,
+                overwrite_conflicts: true,
+            };
+            let plan = if dry_run {
+                plan_restore(repo, &*repo.index_or_empty()?, workdir, &request)?
+            } else {
+                update_index(repo, |index| {
+                    let plan = plan_restore(repo, index, workdir, &request)?;
+                    apply_restore(repo, index, workdir, &plan)?;
+                    move_head()?;
+                    Ok(plan)
+                })?
+            };
+            hard = Some(summarize(plan, dry_run));
+        }
     }
-    let (staged, _) = index_changes(repo, &target_tree, &[])?;
+    let tree_now = if dry_run {
+        repo.find_commit(previous)?.tree_id()?.detach()
+    } else {
+        target_tree
+    };
+    let (staged, _) = index_changes(repo, &tree_now, &[])?;
+    let hard = hard.unwrap_or_else(|| summarize(Vec::new(), false));
     Ok(ResetResult {
         mode: args.mode,
         previous: previous.to_string(),
         head: target.to_string(),
         branch,
         staged_total: staged.len(),
+        dry_run,
+        files: hard.files,
+        files_count: hard.files_count,
+        discards_changes: hard.discards_changes,
     })
 }
 
@@ -348,7 +420,7 @@ mod tests {
     use super::*;
     use crate::tools::testutil::{
         assert_unchanged, bare_repo, empty_repo, fixture_repo, git_stdout, ls_files, open,
-        porcelain, run_git, run_git_with_env, snapshot, try_git, twins, write,
+        porcelain, run_git, run_git_with_env, snapshot, try_git, twins, worktree_files, write,
     };
 
     fn commit_msg(repo: &gix::Repository, message: &str) -> anyhow::Result<CommitResult> {
@@ -621,6 +693,7 @@ mod tests {
             ResetArgs {
                 rev: rev.map(Into::into),
                 mode,
+                dry_run: None,
             },
         )
     }
@@ -647,6 +720,84 @@ mod tests {
             let staged = git_stdout(ours.path(), &["diff", "--cached", "--name-only"]);
             assert_eq!(res.staged_total, staged.lines().count(), "{flag}");
         }
+    }
+
+    #[test]
+    fn hard_reset_is_a_dry_run_by_default() {
+        let (dir, _) = fixture_repo();
+        let root = dir.path();
+        staged(root);
+        write(root, "a.txt", "an unstaged edit on top\n");
+        let repo = open(root);
+        let before = snapshot(root);
+        let res = reset_to(&repo, Some("HEAD~1"), ResetMode::Hard).unwrap();
+        assert_unchanged(root, &before);
+        assert!(res.dry_run && res.discards_changes);
+        assert_eq!(res.head, rev(root, "HEAD~1"));
+        let a = res.files.iter().find(|f| f.path == "a.txt").unwrap();
+        assert!(a.discards_changes);
+    }
+
+    #[test]
+    fn hard_reset_matches_git() {
+        for target in ["HEAD", "HEAD~1"] {
+            let messy = |root: &Path| {
+                staged(root);
+                write(root, "a.txt", "an unstaged edit on top\n");
+                write(root, "untracked.txt", "kept\n");
+            };
+            let [(ours, repo), (theirs, _)] = twins(messy);
+            let res = reset(
+                &repo,
+                ResetArgs {
+                    rev: Some(target.into()),
+                    mode: ResetMode::Hard,
+                    dry_run: Some(false),
+                },
+            )
+            .unwrap();
+            run_git(theirs.path(), &["reset", "-q", "--hard", target]);
+            assert_eq!(
+                worktree_files(ours.path()),
+                worktree_files(theirs.path()),
+                "{target}"
+            );
+            assert_eq!(ls_files(ours.path()), ls_files(theirs.path()), "{target}");
+            assert_eq!(porcelain(ours.path()), porcelain(theirs.path()), "{target}");
+            assert!(!res.dry_run);
+            assert_eq!(res.staged_total, 0);
+            assert_eq!(
+                last_reflog(ours.path(), "HEAD"),
+                format!("reset: moving to {target}")
+            );
+        }
+    }
+
+    #[test]
+    fn hard_reset_overwrites_conflict_stages() {
+        let conflicted = |root: &Path| {
+            run_git(root, &["checkout", "-q", "feature"]);
+            write(root, "a.txt", "theirs\n");
+            run_git(root, &["commit", "-q", "-am", "theirs"]);
+            run_git(root, &["checkout", "-q", "main"]);
+            write(root, "a.txt", "ours\n");
+            run_git(root, &["commit", "-q", "-am", "ours"]);
+            assert!(!try_git(root, &["merge", "-q", "feature"]));
+            std::fs::remove_file(root.join(".git/MERGE_HEAD")).unwrap();
+        };
+        let [(ours, repo), (theirs, _)] = twins(conflicted);
+        reset(
+            &repo,
+            ResetArgs {
+                rev: None,
+                mode: ResetMode::Hard,
+                dry_run: Some(false),
+            },
+        )
+        .unwrap();
+        run_git(theirs.path(), &["reset", "-q", "--hard"]);
+        assert_eq!(worktree_files(ours.path()), worktree_files(theirs.path()));
+        assert_eq!(ls_files(ours.path()), ls_files(theirs.path()));
     }
 
     #[test]

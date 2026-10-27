@@ -12,11 +12,11 @@ _Last updated 2026-10-27._
 | 1 Core read | ✅ Done: 9 tools, each checked against the git CLI |
 | 2 Deep read and inspection | ✅ Done: 14 tools, each checked against the git CLI |
 | 3 Safe writes | ✅ Done: 10 tools behind `--allow-write`, each checked against the git CLI |
-| 4 History rewriting | ⏭️ Next |
+| 4 History rewriting | 🚧 In progress: `reset` hard and `clean` |
 | 5 MCP-native extras | Planned |
 | 6 Hardening and release | Planned |
 
-The server has 27 read-only tools, plus 10 write tools registered only with `--allow-write`. 186 unit tests and the end-to-end smoke test pass, with 96.2% line coverage.
+The server has 27 read-only tools, plus 11 write tools registered only with `--allow-write`. 193 unit tests and the end-to-end smoke test pass, with 96.2% line coverage.
 
 ## Design principles
 
@@ -54,6 +54,7 @@ src/
    ├─ staging.rs    stage, unstage
    ├─ commit.rs     commit, reset
    ├─ checkout.rs   restore, switch
+   ├─ clean.rs      clean
    ├─ submodules.rs list_submodules
    ├─ config.rs     config_get
    ├─ objects.rs    count_objects
@@ -302,11 +303,20 @@ gix has no sequencer, so this phase is where we build our own logic on its primi
 | `cherry_pick` / `revert` | `merge_trees(base=parent, ours=HEAD, theirs=commit)` per commit (inverted for revert). Write `CHERRY_PICK_HEAD` on conflict |
 | `rebase` | Our own minimal sequencer: a list of picks in `.git/rebase-merge` (git-compatible layout, so `git rebase --continue` still works). Supports `onto`, `continue`, `abort` and `skip`. No interactive editor: `todo` comes in as a structured list (`pick`/`drop`/`squash`/`reword` with message) |
 | `stash_push` / `stash_pop` / `stash_drop` | Implement git's stash commit layout (worktree commit with index and untracked parents) on `commit`/`write_tree`. **gap:** no gix support |
-| `reset` mode `hard` | With `dry_run`, it lists files that would lose changes |
+| `reset` mode `hard` ✅ | With `dry_run`, it lists files that would lose changes |
 | `worktree_add` / `worktree_remove` | `.git/worktrees/<name>` layout and checkout |
-| `clean` | `dirwalk` untracked/ignored → `dry_run` lists them by default |
+| `clean` ✅ | `dirwalk` untracked/ignored → `dry_run` lists them by default |
 
 **Exit criteria:** each operation leaves on-disk state that real `git` can continue or abort. Test this by interleaving gitrs-mcp and git CLI steps.
+
+### Phase 4: deviations from the plan
+
+- **`reset` mode `hard`.**
+  - Reuses `restore`'s planner (index and worktree from the target commit, everything matched), and overwrites conflict stages as `git reset --hard` does.
+  - `dry_run` defaults to true for `hard` only, so `soft` and `mixed` keep applying immediately. The result gains `files`, `files_count` and `discards_changes`, and `reset` is now annotated destructive.
+  - Like the other HEAD-moving tools, it refuses during an in-progress operation; `merge_abort` and friends will cover aborting.
+  - gix skips a ref update that leaves the ref where it is, but git still logs `reset: moving to HEAD`, so `reset` appends those reflog entries itself.
+- **`clean`.** Follows `git clean`: files only by default; `directories` (`-d`), `ignored: also` (`-x`) and `only` (`-X`). Nested repositories are always kept (git needs `-ff` to remove them). A dry run by default.
 
 ---
 
@@ -368,6 +378,6 @@ gix has no sequencer, so this phase is where we build our own logic on its primi
 | 1 Core read | 9 | ~4.9k lines including tests (planned ~2–3k) | ✅ done |
 | 2 Deep read | 14 | ~2k LOC | ✅ done |
 | 3 Safe writes | 10 | ~2–3k LOC (index writing and checkout safety are the hard parts) | ✅ done |
-| 4 Rewriting | 8 | ~3–4k LOC (sequencer and stash) | ⏭️ next |
+| 4 Rewriting | 8 | ~3–4k LOC (sequencer and stash) | 🚧 2 of 8 |
 | 5 MCP extras | resources, prompts, progress, multi-repo | ~1.5k LOC | planned |
 | 6 Hardening | — | ongoing | planned |

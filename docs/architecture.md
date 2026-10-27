@@ -35,6 +35,7 @@ src/
    ├─ staging.rs    stage, unstage
    ├─ commit.rs     commit, reset
    ├─ checkout.rs   restore, switch: working-tree writes
+   ├─ clean.rs      clean
    ├─ submodules.rs list_submodules
    ├─ config.rs     config_get, plus the secret redaction submodule URLs share
    ├─ objects.rs    count_objects

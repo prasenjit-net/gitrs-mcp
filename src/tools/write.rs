@@ -111,9 +111,22 @@ pub fn committer(repo: &gix::Repository) -> anyhow::Result<gix::actor::Signature
 
 /// Record in HEAD's reflog that HEAD moved from `old` to `new`, as git does when HEAD switches to
 /// another branch or is renamed along with its branch. gix's ref transactions only log updates of a
-/// ref's object id, not of HEAD's symbolic target. Skipped when `core.logAllRefUpdates` is false.
+/// ref's object id, not of HEAD's symbolic target.
 pub fn log_head_move(
     repo: &gix::Repository,
+    old: Option<gix::ObjectId>,
+    new: gix::ObjectId,
+    message: &str,
+) -> anyhow::Result<()> {
+    append_reflog(repo, "HEAD", old, new, message)
+}
+
+/// Append an entry to the reflog of `name` (`HEAD`, or a full ref name such as `refs/heads/main`),
+/// for updates gix's transactions don't log: symbolic moves of HEAD, and updates that leave a ref
+/// where it was (git still logs `reset: moving to HEAD`). Skipped when `core.logAllRefUpdates` is false.
+pub fn append_reflog(
+    repo: &gix::Repository,
+    name: &str,
     old: Option<gix::ObjectId>,
     new: gix::ObjectId,
     message: &str,
@@ -127,7 +140,15 @@ pub fn log_head_move(
         signature: committer(repo)?,
         message: message.into(),
     };
-    let path = repo.git_dir().join("logs").join("HEAD");
+    // HEAD's log is per worktree; branch logs are shared by all worktrees.
+    let base = if name == "HEAD" {
+        repo.git_dir()
+    } else {
+        repo.common_dir()
+    };
+    let path = base
+        .join("logs")
+        .join(gix::path::from_bstr(gix::bstr::BStr::new(name))?);
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
@@ -259,6 +280,29 @@ mod tests {
         }
         assert_eq!(tag_ref("v1.0").unwrap().as_bstr(), "refs/tags/v1.0");
         assert!(tag_ref("v 1").is_err());
+    }
+
+    #[test]
+    fn reflog_entries_follow_core_log_all_ref_updates() {
+        let (dir, repo) = fixture_repo();
+        let root = dir.path();
+        let head = repo.head_id().unwrap().detach();
+        append_reflog(
+            &repo,
+            "refs/heads/main",
+            Some(head),
+            head,
+            "reset: moving to HEAD",
+        )
+        .unwrap();
+        let log = std::fs::read_to_string(root.join(".git/logs/refs/heads/main")).unwrap();
+        assert!(log.ends_with("\treset: moving to HEAD\n"), "{log}");
+
+        run_git(root, &["config", "core.logAllRefUpdates", "false"]);
+        let quiet = open(root);
+        let before = crate::tools::testutil::snapshot(root);
+        append_reflog(&quiet, "HEAD", Some(head), head, "not logged").unwrap();
+        crate::tools::testutil::assert_unchanged(root, &before);
     }
 
     #[test]

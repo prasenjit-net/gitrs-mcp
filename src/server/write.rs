@@ -143,12 +143,13 @@ impl GitServer {
     }
 
     /// Move the current branch (or detached HEAD) to another commit, like `git reset`: `mixed` (the
-    /// default) also resets the index so the undone changes become unstaged; `soft` keeps them staged.
-    /// The working tree is never touched. The result's `previous` undoes it.
+    /// default) also resets the index so the undone changes become unstaged; `soft` keeps them staged;
+    /// `hard` also overwrites the working tree, so it's a dry run unless `dry_run: false` and reports
+    /// which uncommitted changes would be lost. The result's `previous` undoes the move.
     #[tool(annotations(
         title = "Reset",
         read_only_hint = false,
-        destructive_hint = false,
+        destructive_hint = true,
         idempotent_hint = false
     ))]
     async fn reset(
@@ -195,6 +196,26 @@ impl GitServer {
     ) -> Result<Json<tools::checkout::SwitchResult>, String> {
         self.repo
             .run(move |r| tools::checkout::switch(r, args))
+            .await
+            .map(Json)
+    }
+
+    /// Delete untracked files from the working tree, like `git clean -f`: `directories: true` adds
+    /// untracked directories (`-d`), `ignored` adds ignored files (`also`, like `-x`) or only those
+    /// (`only`, like `-X`). Nested repositories are never removed. Dry run by default: check
+    /// `removed`, then set `dry_run: false`.
+    #[tool(annotations(
+        title = "Clean",
+        read_only_hint = false,
+        destructive_hint = true,
+        idempotent_hint = true
+    ))]
+    async fn clean(
+        &self,
+        Parameters(args): Parameters<tools::clean::CleanArgs>,
+    ) -> Result<Json<tools::clean::CleanResult>, String> {
+        self.repo
+            .run(move |r| tools::clean::clean(r, args))
             .await
             .map(Json)
     }
@@ -293,6 +314,7 @@ mod tests {
             .reset(Parameters(tools::commit::ResetArgs {
                 rev: Some("HEAD~1".into()),
                 mode: tools::commit::ResetMode::Soft,
+                dry_run: None,
             }))
             .await
             .unwrap();

@@ -51,12 +51,14 @@ requests=(
 last_id=29
 expect_error='17' # space-separated request ids that must return a tool error
 
-write_tools='create_branch delete_branch rename_branch create_tag stage unstage commit reset restore switch'
+write_tools='create_branch delete_branch rename_branch create_tag stage unstage commit reset restore switch clean'
 write_requests=(
   "${requests[@]:0:3}"
   # A dry run (the default) on a branch that can't exist: refused, and nothing would change anyway.
   "$(call 3 delete_branch '{"name":"gitrs-smoke-no-such-branch"}')"
   "$(call 4 restore '{"paths":["gitrs-smoke-no-such-path"]}')"
+  # A dry run (the default) limited to a path that can't exist: lists nothing.
+  "$(call 5 clean '{"paths":["gitrs-smoke-no-such-path"]}')"
 )
 
 # Run one server session: server flags, last request id, ids that must error, whether write tools must
@@ -96,4 +98,4 @@ sys.exit(1 if failed else 0)
 }
 
 session "" "$last_id" "$expect_error" no "${requests[@]}"
-session --allow-write 4 "3 4" yes "${write_requests[@]}"
+session --allow-write 5 "3 4" yes "${write_requests[@]}"

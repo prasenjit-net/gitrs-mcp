@@ -8,6 +8,7 @@ pub mod attributes;
 pub mod blame;
 pub mod branches;
 pub mod checkout;
+pub mod clean;
 pub mod commit;
 pub mod config;
 pub mod diff;

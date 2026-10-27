@@ -107,6 +107,7 @@ pub fn restore(repo: &gix::Repository, args: RestoreArgs) -> anyhow::Result<Rest
         source: &source,
         staged: args.staged,
         worktree,
+        overwrite_conflicts: false,
     };
     let plan = if args.dry_run {
         plan_restore(repo, &*repo.index_or_empty()?, &workdir, &request)?
@@ -117,6 +118,11 @@ pub fn restore(repo: &gix::Repository, args: RestoreArgs) -> anyhow::Result<Rest
             Ok(plan)
         })?
     };
+    Ok(summarize(plan, args.dry_run))
+}
+
+/// The result for a restore plan: the files listed (at most 500), counted and flagged.
+pub fn summarize(plan: Vec<Restore>, dry_run: bool) -> RestoreResult {
     let discards_changes = plan.iter().any(|r| r.discards_changes);
     let files_count = plan.len();
     let files = plan
@@ -129,23 +135,26 @@ pub fn restore(repo: &gix::Repository, args: RestoreArgs) -> anyhow::Result<Rest
             discards_changes: r.discards_changes,
         })
         .collect();
-    Ok(RestoreResult {
+    RestoreResult {
         files,
         files_count,
         discards_changes,
-        dry_run: args.dry_run,
-    })
+        dry_run,
+    }
 }
 
-struct RestoreRequest<'a> {
-    paths: &'a [String],
-    source: &'a str,
-    staged: bool,
-    worktree: bool,
+/// What to restore, from where, and into which of the index and working tree.
+pub struct RestoreRequest<'a> {
+    pub paths: &'a [String],
+    pub source: &'a str,
+    pub staged: bool,
+    pub worktree: bool,
+    /// Replace conflict stages instead of refusing, as `git reset --hard` does.
+    pub overwrite_conflicts: bool,
 }
 
 /// One path `restore` changes.
-struct Restore {
+pub struct Restore {
     path: BString,
     /// The source's version; `None` when the source doesn't have the path, so it's removed.
     target: Option<Version>,
@@ -154,7 +163,7 @@ struct Restore {
     discards_changes: bool,
 }
 
-fn plan_restore(
+pub fn plan_restore(
     repo: &gix::Repository,
     index: &gix::index::State,
     workdir: &Path,
@@ -182,7 +191,7 @@ fn plan_restore(
         bail!("`paths` match nothing in {place}; check them with status or list_tree");
     }
     let conflicted = conflicted_paths(index, &matched);
-    if !conflicted.is_empty() {
+    if !conflicted.is_empty() && !request.overwrite_conflicts {
         bail!(
             "{} unresolved merge conflicts; resolve and stage them first (`conflicts` lists them)",
             name_some(
@@ -241,7 +250,7 @@ fn plan_restore(
     Ok(plan)
 }
 
-fn apply_restore(
+pub fn apply_restore(
     repo: &gix::Repository,
     index: &mut gix::index::State,
     workdir: &Path,

@@ -13,7 +13,7 @@ _Last updated 2026-10-27._
 | 2 Deep read and inspection | ✅ Done: 14 tools, each checked against the git CLI |
 | 3 Safe writes | ✅ Done: 10 tools behind `--allow-write`, each checked against the git CLI |
 | 4 History rewriting | ✅ Done: 12 tools behind `--allow-write`, each checked against the git CLI, with git and gitrs-mcp able to continue each other's operations |
-| 5 MCP-native extras | Planned |
+| 5 MCP-native extras | 🚧 In progress: resources and completion |
 | 6 Hardening and release | Planned |
 
 The server has 27 read-only tools, plus 22 write tools registered only with `--allow-write`. 220 unit tests and the end-to-end smoke test pass, with 96.2% line coverage.
@@ -344,7 +344,7 @@ gix has no sequencer, so this phase is where we build our own logic on its primi
 
 ## Phase 5: MCP-native extras
 
-- **Resources.**
+- **Resources.** ✅
   - `gitrs://commit/{id}`, `gitrs://file/{rev}/{path}`, `gitrs://diff/{from}..{to}`, so clients can attach repo content as context.
   - Resource templates plus `completion` for revs and paths.
 - **Prompts.**
@@ -357,6 +357,17 @@ gix has no sequencer, so this phase is where we build our own logic on its primi
   - Accept multiple `--repo` values, or use MCP `roots` from the client.
   - Every tool gets an optional `repo` param. Refuse paths outside the declared roots.
 - **Caching.** Keep a per-process object cache (`object_cache_size_if_unset`) and reuse the commit-graph. Benchmark `log` and `blame` against git on git.git itself.
+
+### Phase 5: deviations from the plan
+
+- **Resources.**
+  - The commit template takes `{rev}` rather than `{id}`, since any revision works. The templates are `gitrs://commit/{rev}`, `gitrs://file/{rev}/{+path}` (RFC 6570 reserved expansion, so the path keeps its `/`) and `gitrs://diff/{from}..{to}`. A `/` inside a revision is percent-encoded as `%2F`, since the URI can't tell it apart from a path separator otherwise.
+  - Three fixed resources are listed as well, so clients that don't expand templates still get something to attach: the HEAD commit, staged changes (`diff/HEAD..index`) and unstaged changes (`diff/index..worktree`).
+  - Content is text, not JSON. A commit reads like `git show` (and the tests compare it with `git show`), and diffs are `git diff` patches, since that's what a model reads best as attached context. Both are built on the `show_commit`, `diff` and `read_file` tools.
+  - A merge commit's patch is against its first parent, not git's combined diff, so that it applies.
+  - `file` takes `index` and `worktree` as revisions, like `read_file`. `diff` supports `<rev>..<rev>`, `<rev>..index` and `index..worktree`; a revision against the working tree isn't supported, as in the `diff` tool.
+  - Resources can't be paged. Files over 1 MiB are refused, with a pointer to `read_file`. Diffs stop at 1,000 files and 1 MiB of patch text, with a closing note saying what was left out.
+- **Completion.** `rev`, `from` and `to` complete from `HEAD` and ref short names, plus `index`/`worktree` where they're valid. `path` completes one directory level at a time against the context revision. Completion errors give no values, since a half-typed context revision is normal.
 
 ---
 

@@ -8,13 +8,19 @@ mod changes;
 mod files;
 mod history;
 mod repo;
+mod resources;
 mod setup;
 mod write;
 
 use rmcp::{
-    ServerHandler,
+    ErrorData as McpError, RoleServer, ServerHandler,
     handler::server::router::tool::ToolRouter,
-    model::{Implementation, ServerCapabilities, ServerConfig},
+    model::{
+        CompleteRequestParams, CompleteResult, Implementation, ListResourceTemplatesResult,
+        ListResourcesResult, PaginatedRequestParams, ReadResourceRequestParams,
+        ReadResourceResponse, ServerCapabilities, ServerConfig,
+    },
+    service::RequestContext,
     tool_handler,
 };
 
@@ -55,12 +61,49 @@ impl GitServer {
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for GitServer {
     fn get_info(&self) -> ServerConfig {
-        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
+        let capabilities = ServerCapabilities::builder()
+            .enable_tools()
+            .enable_resources()
+            .enable_completions()
+            .build();
+        ServerConfig::new(capabilities)
             .with_server_info(Implementation::new(
                 env!("CARGO_PKG_NAME"),
                 env!("CARGO_PKG_VERSION"),
             ))
             .with_instructions(self.instructions())
+    }
+
+    async fn list_resources(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListResourcesResult, McpError> {
+        self.resource_list().await
+    }
+
+    async fn list_resource_templates(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListResourceTemplatesResult, McpError> {
+        Ok(self.resource_templates())
+    }
+
+    async fn read_resource(
+        &self,
+        request: ReadResourceRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ReadResourceResponse, McpError> {
+        self.resource_read(request.uri).await.map(Into::into)
+    }
+
+    async fn complete(
+        &self,
+        request: CompleteRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<CompleteResult, McpError> {
+        Ok(self.completion(request).await)
     }
 }
 
@@ -113,6 +156,65 @@ mod tests {
         "worktree_add",
         "worktree_remove",
     ];
+
+    /// A client connected to a server on `path` over an in-memory pipe, speaking the real protocol.
+    pub(crate) async fn connect(
+        path: &std::path::Path,
+        allow_write: bool,
+    ) -> rmcp::service::RunningService<rmcp::RoleClient, ()> {
+        use rmcp::ServiceExt;
+        let (server_side, client_side) = tokio::io::duplex(1 << 16);
+        let server = server(path, allow_write);
+        tokio::spawn(async move {
+            let running = server.serve(server_side).await?;
+            running.waiting().await?;
+            anyhow::Ok(())
+        });
+        ().serve(client_side).await.expect("client connects")
+    }
+
+    #[tokio::test]
+    async fn resources_and_completion_over_the_protocol() {
+        use rmcp::model::{
+            ArgumentInfo, CompleteRequestParams, ErrorCode, ReadResourceRequestParams, Reference,
+        };
+        let (dir, _) = fixture_repo();
+        let client = connect(dir.path(), false).await;
+        let listed = client.list_all_resources().await.unwrap();
+        assert_eq!(listed.len(), 3);
+        let templates = client.list_all_resource_templates().await.unwrap();
+        assert_eq!(templates.len(), 3);
+
+        let read = client
+            .read_resource(ReadResourceRequestParams::new("gitrs://diff/HEAD~1..HEAD"))
+            .await
+            .unwrap();
+        let text = serde_json::to_value(&read.contents).unwrap()[0]["text"].clone();
+        assert!(
+            text.as_str()
+                .unwrap()
+                .starts_with("diff --git a/a.txt b/a.txt\n")
+        );
+
+        let err = client
+            .read_resource(ReadResourceRequestParams::new("gitrs://nope"))
+            .await
+            .unwrap_err();
+        match err {
+            rmcp::ServiceError::McpError(e) => assert_eq!(e.code, ErrorCode::RESOURCE_NOT_FOUND),
+            other => panic!("expected an MCP error, got {other:?}"),
+        }
+
+        let found = client
+            .complete(CompleteRequestParams::new(
+                Reference::for_resource("gitrs://commit/{rev}"),
+                ArgumentInfo::new("rev", "v"),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(found.completion.values, ["v1"]);
+        client.cancel().await.unwrap();
+    }
 
     fn server(path: &std::path::Path, allow_write: bool) -> GitServer {
         GitServer::new(RepoHandle::open_isolated(path), Policy { allow_write })

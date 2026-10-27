@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# End-to-end MCP check over stdio: initialize, list tools, call every read tool once, then start a
-# second session with --allow-write and check the write tools appear only there.
+# End-to-end MCP check over stdio: initialize, list tools, call every read tool once, list and read
+# resources and complete an argument, then start a second session with --allow-write and check the
+# write tools appear only there.
 # Usage: scripts/smoke.sh <path-to-gitrs-mcp-binary> <repo> [file]
 # `file` is a tracked file for read_file, blame and file_history (default README.md).
 # Calls whose result depends on what the repo contains (a tag to show, ...) ask for something that
@@ -47,9 +48,15 @@ requests=(
   "$(call 27 check_attr '{"paths":["'"$file"'"]}')"
   "$(call 28 conflicts '{}')"
   "$(call 29 merge_preview '{"theirs":"HEAD"}')"
+  '{"jsonrpc":"2.0","id":30,"method":"resources/list"}'
+  '{"jsonrpc":"2.0","id":31,"method":"resources/templates/list"}'
+  '{"jsonrpc":"2.0","id":32,"method":"resources/read","params":{"uri":"gitrs://commit/HEAD"}}'
+  '{"jsonrpc":"2.0","id":33,"method":"resources/read","params":{"uri":"gitrs://file/HEAD/'"$file"'"}}'
+  '{"jsonrpc":"2.0","id":34,"method":"resources/read","params":{"uri":"gitrs://commit/gitrs-smoke-no-such-rev"}}'
+  '{"jsonrpc":"2.0","id":35,"method":"completion/complete","params":{"ref":{"type":"ref/resource","uri":"gitrs://commit/{rev}"},"argument":{"name":"rev","value":"H"}}}'
 )
-last_id=29
-expect_error='17' # space-separated request ids that must return a tool error
+last_id=35
+expect_error='17 34' # space-separated request ids that must fail: a tool error, or a protocol error
 
 write_tools='create_branch delete_branch rename_branch create_tag stage unstage commit reset restore switch clean stash_push stash_pop stash_drop merge cherry_pick revert rebase continue_operation abort_operation worktree_add worktree_remove'
 write_requests=(
@@ -86,7 +93,7 @@ for line in sys.stdin:
     msg_id = msg.get("id")
     expected.discard(msg_id)
     res = msg.get("result") or {}
-    if "error" in msg or bool(res.get("isError")) != (msg_id in want_error):
+    if ("error" in msg or bool(res.get("isError"))) != (msg_id in want_error):
         print(f"unexpected outcome for request id {msg_id}", file=sys.stderr)
         failed = True
     if "tools" in res:

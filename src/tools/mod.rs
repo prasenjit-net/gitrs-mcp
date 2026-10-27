@@ -23,6 +23,7 @@ pub mod rebase;
 pub mod reflog;
 pub mod refs;
 pub mod repo;
+pub mod resources;
 pub mod revision;
 pub mod staging;
 pub mod stash;

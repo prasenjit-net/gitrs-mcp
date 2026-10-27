@@ -10,6 +10,7 @@ clap = { version = "4.6.7", features = ["derive"] }
 gix = { version = "0.90", default-features = false, features = ["max-performance", "sha1", "basic", "status", "dirwalk", "blame", "merge", "mailmap", "revparse-regex", "worktree-mutation", "interrupt", "notes"] }
 regex = "1.13.1"
 rmcp = { version = "3.7.0", features = ["server", "transport-io", "macros"] }
+percent-encoding = "2.3.2"
 schemars = "1.2.3"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
@@ -19,3 +20,5 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 
 [dev-dependencies]
 tempfile = "3.27.0"
+# An in-process MCP client, so tests can drive the server through the real protocol.
+rmcp = { version = "3.7.0", features = ["client"] }

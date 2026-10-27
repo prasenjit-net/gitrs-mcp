@@ -13,11 +13,13 @@ src/
 │  ├─ files.rs      file contents, search, ignore and attribute rules, blame
 │  ├─ history.rs    commit history and notes
 │  ├─ setup.rs      worktrees, submodules, config and object storage
+│  ├─ resources.rs  resources and completion, mapped onto rmcp's types
 │  └─ write.rs      write tools; only registered with --allow-write
 ├─ repo.rs          RepoHandle: opens the repository, runs gix calls on the blocking pool
 └─ tools/           Git logic, as plain synchronous functions over &gix::Repository
    ├─ mod.rs        shared types and helpers (Signature, LogEntry, ChangeKind, pagination, paths), test fixtures
    ├─ repo.rs       repo_info
+   ├─ resources.rs  gitrs:// URIs: parsing, reading (built on show_commit, diff and read_file), completion
    ├─ refs.rs       list_refs, describe, show_tag
    ├─ reflog.rs     reflog, list_stashes (git keeps stashes as the reflog of refs/stash)
    ├─ notes.rs      notes
@@ -50,7 +52,7 @@ Each layer has one job, and dependencies only point downward:
 | Layer | Owns | Must not |
 |---|---|---|
 | `main.rs` | Argument parsing, logging setup, starting the stdio transport | Contain tool logic |
-| `server/` | Registering tools with rmcp, their titles and annotations, server instructions | Touch gix internals |
+| `server/` | Registering tools with rmcp, their titles and annotations, server instructions; mapping resources and completion onto rmcp's types | Touch gix internals |
 | `repo.rs` | Opening the repository and bridging sync gix calls into async rmcp handlers | Know about individual tools |
 | `tools/` | All Git behaviour, plus the argument and result types that become JSON Schemas | Import `rmcp` or `server` |
 

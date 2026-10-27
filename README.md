@@ -8,6 +8,7 @@ It lets AI assistants inspect a Git repository through typed tools with structur
 - **Read-only by default.** Write tools exist only when you start the server with `--allow-write`; without it they aren't even listed. They check everything before writing, refuse instead of overwriting work, and default to a dry run when data could be lost.
 - **Git-compatible.** Results match the `git` CLI on the same repository: the test suite checks each tool against real `git` output, and generated patches apply with `git apply`.
 - **Structured output.** Every tool returns JSON with a published output schema. Bad input, such as an unknown revision, comes back as a tool error the model can read and correct.
+- **Context to attach.** Commits, files and diffs are also served as `gitrs://` resources (for example the staged changes), with completion of revisions and paths.
 - **Pure Rust.** It runs as a single static binary that speaks MCP over stdio, and it doesn't need `libgit2` or the `git` executable.
 
 > **Status:** early development. Phases 0–4 of the [roadmap](ROADMAP.md) are done: 27 read-only tools covering status, diffs, merge previews and conflicts, file contents, code search, ignore and attribute rules, history, blame, refs, tags, reflogs, stashes, notes, worktrees, submodules, config and object stats; and, with `--allow-write`, 22 write tools for the local edit, stage, commit and branch loop, plus merges, cherry-picks, reverts, rebases, stashes, hard resets, `clean` and worktrees. Merges and rebases that stop on conflicts leave git's own state, so you can finish them with either gitrs-mcp or git.
@@ -129,6 +130,7 @@ The full reference, with every argument, result field, error and a real example 
 ## Documentation
 
 - [docs/tools.md](docs/tools.md): tool reference.
+- [docs/resources.md](docs/resources.md): `gitrs://` resources and argument completion.
 - [docs/configuration.md](docs/configuration.md): CLI flags, environment, git settings that affect results, and client setup.
 - [docs/architecture.md](docs/architecture.md): layers, data flow, the sync/async bridge, and the safety model.
 - [docs/development.md](docs/development.md): setup, make targets, adding a tool, testing and coverage.
@@ -153,11 +155,12 @@ Contributor rules (code quality, MCP documentation, testing and the pre-commit c
 ```
 src/
 ├─ main.rs          CLI arguments, logging, stdio transport
-├─ server/          MCP tool registration: thin async wrappers, one router per area
+├─ server/          MCP registration: thin async wrappers, one router per area, plus resources and completion
 ├─ repo.rs          Thread-safe repo handle; runs gix calls on the blocking pool
 └─ tools/           Git logic as plain sync functions over &gix::Repository
    ├─ mod.rs        shared types and helpers, test fixtures
    ├─ repo.rs       repo_info
+   ├─ resources.rs  gitrs:// resources (commit, file, diff) and argument completion
    ├─ refs.rs       list_refs, describe, show_tag
    ├─ reflog.rs     reflog, list_stashes
    ├─ notes.rs      notes

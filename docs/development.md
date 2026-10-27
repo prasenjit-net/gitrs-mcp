@@ -39,7 +39,7 @@ Run `make` (or `make help`) for the full list.
 | `make test` | Unit tests. `make test-verbose` shows test output. |
 | `make fmt` / `make fmt-check` | Format, or check formatting. |
 | `make clippy` | Lint with warnings as errors. |
-| `make smoke` | End-to-end MCP round trip over stdio: initialize, `tools/list`, then one call to every tool against `REPO`. Fails if any call errors or gets no answer. |
+| `make smoke` | End-to-end MCP round trip over stdio: initialize, `tools/list`, then one call to every read tool against `REPO`; then a second session with `--allow-write` that checks the write tools are listed only there and calls one in a way that can't change anything. Fails if any call has an unexpected outcome or gets no answer. |
 | `make inspector` | Open the [MCP Inspector](https://github.com/modelcontextprotocol/inspector) against the server, to try tools by hand. |
 | `make check` | `fmt-check`, `clippy`, `test` and `smoke`: everything CI should run. |
 | `make coverage` | Line coverage summary; fails below 80% (`COVERAGE_MIN`). |
@@ -103,16 +103,17 @@ Every tool has unit tests in its own file, in a `#[cfg(test)] mod tests` block. 
 | `run_git`, `run_git_with_env`, `try_git`, `git_stdout` | Run the system `git` with a clean, fixed identity, to build scenarios or get the expected output. |
 | `git_output` | Run `git` with input on stdin and return its raw output without checking the exit status, for oracles such as `git grep` and `git check-ignore` that exit 1 when nothing matches. |
 | `write(root, path, content)` | Write a file, creating parent directories. |
+| `snapshot(dir)` | Every file below `dir` with its content (symlinks by target), to prove a refused or dry-run write changed nothing. |
 
 **Use git as the oracle.** When a tool's output mirrors a git command, build the scenario with `git`, run the matching command, and assert that the tool's result is equivalent. The existing tests compare against `git status --porcelain=v2`, `git diff` (`--numstat`, `--name-status` and full patch text), `git ls-tree`, `git log -- <path>`, `git log --follow`, `git log -g`, `git rev-list`, `git rev-parse`, `git merge-base`, `git blame --porcelain`, `git describe`, `git stash list`, `git notes`, `git grep`, `git check-ignore`, `git check-attr`, `git config --list`, `git worktree list --porcelain`, `git submodule status`, `git count-objects -v`, `git ls-files -u` and `git merge-tree --write-tree`. `merge_preview` is also checked to leave `.git/objects` untouched. The diff tests also apply generated patches to a clone with `git apply --index` and check that the result matches the target commit.
 
-**Cover the edges.** For each tool, test the happy path and its defaults (including deserializing `{}`), plus the cases that apply: an empty repository, a detached HEAD, a bare repository, unicode paths, binary content, pagination boundaries, bad revisions, missing paths and refused input. Write tools will also need to test that a refused or dry-run call leaves the repository byte-for-byte unchanged.
+**Cover the edges.** For each tool, test the happy path and its defaults (including deserializing `{}`), plus the cases that apply: an empty repository, a detached HEAD, a bare repository, unicode paths, binary content, pagination boundaries, bad revisions, missing paths and refused input. Write tools must also test that every refused or dry-run call leaves the repository byte-for-byte unchanged: take `testutil::snapshot(root)` (every file under the worktree and `.git`) before the call and compare it afterwards. Fixture repositories have `user.name` and `user.email` in their local config, because repositories opened by `open` ignore the environment and write tools need a committer.
 
 **Fix bugs test-first.** Start a bug fix with a failing test that reproduces it.
 
 ## Coverage
 
-`make coverage` fails below 80% line coverage. New code in `src/tools/` should be at or near full coverage, and coverage must not drop. `main.rs`, `server/` and `repo.rs` are exercised by `make smoke`, not by unit tests, so they show as uncovered there. Use `make coverage-html` to see which lines a change left untested.
+`make coverage` fails below 80% line coverage. New code in `src/tools/` should be at or near full coverage, and coverage must not drop. `main.rs`, `repo.rs` and the read-tool wrappers in `server/` are exercised by `make smoke`, not by unit tests, so they show as uncovered there. The `--allow-write` gating and the write-tool wrappers have unit tests in `server/` (using `RepoHandle::open_isolated`, which doesn't change the process directory), because a stdio smoke test can't safely change the served repository. Use `make coverage-html` to see which lines a change left untested.
 
 ## Before committing
 

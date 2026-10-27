@@ -1,6 +1,6 @@
 # Tool reference
 
-gitrs-mcp exposes 27 read-only tools. This page covers each one: what it does, its arguments and defaults, the fields it returns, the errors it reports, and a real request and response.
+gitrs-mcp exposes 27 read-only tools, plus 4 write tools that are only available when the server runs with `--allow-write`. This page covers each one: what it does, its arguments and defaults, the fields it returns, the errors it reports, and a real request and response.
 
 - [Conventions](#conventions)
 - [Shared types](#shared-types)
@@ -9,6 +9,7 @@ gitrs-mcp exposes 27 read-only tools. This page covers each one: what it does, i
 - Files: [`read_file`](#read_file), [`list_tree`](#list_tree), [`blame`](#blame), [`grep`](#grep), [`check_ignore`](#check_ignore), [`check_attr`](#check_attr)
 - History: [`log`](#log), [`show_commit`](#show_commit), [`file_history`](#file_history), [`search_commits`](#search_commits), [`notes`](#notes)
 - Repository setup: [`list_worktrees`](#list_worktrees), [`list_submodules`](#list_submodules), [`config_get`](#config_get), [`count_objects`](#count_objects)
+- [Write tools](#write-tools) (only with `--allow-write`): [`create_branch`](#create_branch), [`delete_branch`](#delete_branch), [`rename_branch`](#rename_branch), [`create_tag`](#create_tag)
 
 ## Conventions
 
@@ -1595,11 +1596,195 @@ Statistics for the repository's object database, like `git count-objects -v`, wi
 {
   "alternates": 0,
   "commit_graph": false,
-  "loose_bytes": 163840,
-  "loose_objects": 40,
+  "loose_bytes": 147456,
+  "loose_objects": 36,
   "multi_pack_index": false,
   "pack_bytes": 0,
   "packed_objects": 0,
   "packs": 0
+}
+```
+
+---
+
+## Write tools
+
+These tools change the repository. They are only registered when the server is started with `--allow-write`; without the flag, `tools/list` doesn't include them at all. They all follow the same rules:
+
+- **Check first, then write.** Every check runs before anything is written, so a refused call leaves the repository byte for byte as it was. The tests prove this for each tool.
+- **No surprises with in-progress operations.** Tools that move HEAD, rewrite the index or touch the working tree refuse while a merge, rebase, cherry-pick, revert or bisect is in progress. Creating branches and tags is still allowed then, as in git.
+- **Destructive tools default to a dry run.** A tool that can lose data, such as `delete_branch`, takes `dry_run` (default `true`) and runs every check without changing anything. Pass `dry_run: false` to act.
+- **Ref updates are compare-and-swap.** Each ref is updated only if it still points where the tool saw it, under git's lock files, so a concurrent `git` command can't be overwritten silently. Reflog entries use the same messages git writes.
+- **An identity is required.** Commits, tags and reflog entries record a committer from `user.name` and `user.email` in the git config (or the `GIT_COMMITTER_*` environment variables). Without one, the call is refused with instructions.
+- **Results describe the new state**, such as a ref's new target, so a follow-up read isn't needed.
+
+The examples in this part ran against a freshly built demo for each call, with `GIT_COMMITTER_DATE` fixed so the SHAs are reproducible.
+
+## `create_branch`
+
+Create a branch at a commit, like `git branch <name> [<start_point>]`. HEAD doesn't move; use `switch` for that.
+
+**Arguments**
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `name` | string | required | Name of the new branch, e.g. `feature/login`. `refs/heads/` is added. |
+| `start_point` | string | `HEAD` | Commit the branch starts at: a branch, tag, SHA or expression like `HEAD~2`. |
+| `force` | boolean | `false` | Move the branch if it already exists, like `git branch --force`. Never allowed for a branch checked out in a worktree. |
+
+**Result**
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | string | Full ref name, e.g. `refs/heads/feature/login`. |
+| `short_name` | string | Short name, e.g. `feature/login`. |
+| `target` | string | Full SHA the branch points to now. |
+| `previous` | string \| null | Full SHA the branch pointed to before a forced move; `null` when it was created. |
+
+**Errors:** an invalid name; an existing branch without `force`; moving a checked-out branch; an unknown start point; no commits yet; no committer identity.
+
+**Example**
+
+```json
+{"name": "hotfix", "start_point": "v0.1.0"}
+```
+
+```json
+{"name": "refs/heads/hotfix", "previous": null, "short_name": "hotfix", "target": "41dad034dd469fe144a58a71bcd86453cd70ade1"}
+```
+
+## `delete_branch`
+
+Delete a local branch, like `git branch -d`. Dry run by default.
+
+It refuses a branch that is checked out in any worktree, and a branch whose commits aren't all reachable from its upstream (when one is configured and present) or otherwise from HEAD, unless `force` is set, like `git branch -D`. The branch's `branch.<name>.*` configuration is removed with it. Its commits stay in the repository, so the deletion can be undone with `create_branch` using the reported `target`.
+
+**Arguments**
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `name` | string | required | Branch to delete. |
+| `force` | boolean | `false` | Delete even if its commits aren't merged. |
+| `dry_run` | boolean | `true` | Only check and report. Set `false` to delete. |
+
+**Result**
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | string | Full ref name. |
+| `target` | string | Full SHA the branch pointed to. |
+| `merged` | boolean | True when every commit on the branch is reachable from `merged_into`. |
+| `merged_into` | string | What `merged` was checked against: the upstream ref or `HEAD`. |
+| `deleted` | boolean | True when the branch was deleted; false on a dry run. |
+| `dry_run` | boolean | Whether this was a dry run. |
+
+**Errors:** no such branch; the branch is checked out; it isn't fully merged and `force` isn't set.
+
+**Examples**
+
+A dry run with `force`, for a branch with unmerged work:
+
+```json
+{"name": "polish", "force": true}
+```
+
+```json
+{
+  "deleted": false,
+  "dry_run": true,
+  "merged": false,
+  "merged_into": "HEAD",
+  "name": "refs/heads/polish",
+  "target": "10fd2e0634518dfc3f069fe8de98d03b71c333ef"
+}
+```
+
+A checked-out branch:
+
+```json
+{"name": "feature"}
+```
+
+```
+branch `feature` is checked out at /path/to/demo-review; switch that worktree to another branch first
+```
+
+## `rename_branch`
+
+Rename a local branch, like `git branch -m`. The reflog and `branch.<name>.*` configuration move with it, and HEAD follows when it's the current branch. Refused while an operation is in progress and for a branch checked out in another worktree.
+
+**Arguments**
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `old` | string | current branch | Branch to rename. |
+| `new` | string | required | New name. |
+| `force` | boolean | `false` | Replace an existing branch named `new`, like `git branch -M`. |
+
+**Result**
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | string | Full new ref name. |
+| `short_name` | string | Short new name. |
+| `target` | string | Full SHA the branch points to, unchanged by the rename. |
+| `renamed_from` | string | Full ref name the branch had before. |
+| `head_updated` | boolean | True when HEAD was on the branch and now points to the new name. |
+| `replaced` | string \| null | With `force`, the full SHA the replaced branch pointed to; `null` when none was replaced. |
+
+**Errors:** no such branch; `new` exists without `force`; the branch is checked out in another worktree; HEAD is detached and `old` isn't given; an operation is in progress.
+
+**Example**
+
+```json
+{"old": "polish", "new": "farewell-wording"}
+```
+
+```json
+{
+  "head_updated": false,
+  "name": "refs/heads/farewell-wording",
+  "previous": null,
+  "renamed_from": "refs/heads/polish",
+  "short_name": "farewell-wording",
+  "target": "10fd2e0634518dfc3f069fe8de98d03b71c333ef"
+}
+```
+
+## `create_tag`
+
+Create a tag, like `git tag`. With a `message` the tag is annotated: a tag object recording you as tagger, the date and the message (tidied as `git tag -m` does). Without one it's lightweight, a plain ref. The result is the new tag as [`show_tag`](#show_tag) describes it.
+
+**Arguments**
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `name` | string | required | Tag name, e.g. `v1.2.0`. `refs/tags/` is added. |
+| `target` | string | `HEAD` | What to tag: any revision. Tags aren't peeled, so this can tag a tag. |
+| `message` | string | none | Message for an annotated tag. Omit it for a lightweight tag. |
+| `force` | boolean | `false` | Replace an existing tag with the same name. |
+
+**Result:** the same fields as [`show_tag`](#show_tag).
+
+**Errors:** an invalid name; an existing tag without `force`; a message with no text; an unknown target; no committer identity.
+
+**Example**
+
+```json
+{"name": "v0.2.0", "message": "Second release"}
+```
+
+```json
+{
+  "kind": "annotated",
+  "message": "Second release\n",
+  "name": "refs/tags/v0.2.0",
+  "peeled": "48ce6b19c89fc67695e4e723b8192fb167fb8f00",
+  "peeled_type": "commit",
+  "signed": false,
+  "tag_id": "aca96d32573d1a807e34f5656fad47c53bea79d6",
+  "tagger": {"email": "ada@example.com", "name": "Ada Lovelace", "offset": 0, "time": 1791200000},
+  "target": "48ce6b19c89fc67695e4e723b8192fb167fb8f00",
+  "target_type": "commit"
 }
 ```

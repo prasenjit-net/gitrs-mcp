@@ -23,6 +23,9 @@ git -C assets add . && at 1790841600 && git -C assets commit -q -m "Add styleshe
 
 git init -q -b main demo
 cd demo
+# The identity write tools record as committer and tagger.
+git config user.name "Ada Lovelace"
+git config user.email ada@example.com
 mkdir src
 printf '# greet\n\nA tiny greeting library.\n' > README.md
 printf 'pub fn greet(name: &str) -> String {\n    format!("Hello, {name}!")\n}\n' > src/lib.rs

@@ -33,6 +33,16 @@ impl RepoHandle {
         })
     }
 
+    /// Open the repository at `path` with global and system config ignored, without changing the
+    /// process directory (which tests share), for exercising the MCP layer.
+    #[cfg(test)]
+    pub fn open_isolated(path: &Path) -> Self {
+        Self {
+            repo: gix::ThreadSafeRepository::open_opts(path, gix::open::Options::isolated())
+                .expect("test repository opens"),
+        }
+    }
+
     pub fn git_dir(&self) -> &Path {
         self.repo.git_dir()
     }

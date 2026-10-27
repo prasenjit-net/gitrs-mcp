@@ -314,12 +314,12 @@ impl Page {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::BTreeMap, path::Path};
+    use std::path::Path;
 
     use super::*;
     use crate::tools::testutil::{
-        bare_repo, fixture_repo, git_output, git_stdout, open, run_git, run_git_with_env, try_git,
-        write,
+        bare_repo, fixture_repo, git_output, git_stdout, open, run_git, run_git_with_env, snapshot,
+        try_git, write,
     };
 
     fn preview(
@@ -412,33 +412,16 @@ mod tests {
             .collect()
     }
 
-    /// Every file under `.git/objects` with its size, to prove nothing was written.
-    fn object_store(root: &Path) -> BTreeMap<String, u64> {
-        fn walk(dir: &Path, out: &mut BTreeMap<String, u64>) {
-            for entry in std::fs::read_dir(dir).unwrap() {
-                let path = entry.unwrap().path();
-                if path.is_dir() {
-                    walk(&path, out);
-                } else {
-                    out.insert(path.display().to_string(), path.metadata().unwrap().len());
-                }
-            }
-        }
-        let mut out = BTreeMap::new();
-        walk(&root.join(".git/objects"), &mut out);
-        out
-    }
-
     #[test]
     fn conflicted_merge_matches_git_merge_tree() {
         let (dir, repo) = diverged();
         let root = dir.path();
-        let before = object_store(root);
+        let before = snapshot(&root.join(".git"));
         let res = preview(&repo, "main", "side").unwrap();
         assert_eq!(
-            object_store(root),
+            snapshot(&root.join(".git")),
             before,
-            "a preview must not write objects"
+            "a preview must not write anything"
         );
 
         let (tree, stages) = git_merge_tree(root, &["main", "side"]);

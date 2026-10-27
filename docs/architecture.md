@@ -12,7 +12,8 @@ src/
 │  ├─ changes.rs    working tree, index, conflicts and merge previews
 │  ├─ files.rs      file contents, search, ignore and attribute rules, blame
 │  ├─ history.rs    commit history and notes
-│  └─ setup.rs      worktrees, submodules, config and object storage
+│  ├─ setup.rs      worktrees, submodules, config and object storage
+│  └─ write.rs      write tools; only registered with --allow-write
 ├─ repo.rs          RepoHandle: opens the repository, runs gix calls on the blocking pool
 └─ tools/           Git logic, as plain synchronous functions over &gix::Repository
    ├─ mod.rs        shared types and helpers (Signature, LogEntry, ChangeKind, pagination, paths), test fixtures
@@ -29,6 +30,8 @@ src/
    ├─ attributes.rs check_ignore, check_attr
    ├─ blame.rs      blame
    ├─ worktrees.rs  list_worktrees
+   ├─ write.rs      guards shared by the write tools: refusals, name validation, identity, message cleanup
+   ├─ branches.rs   create_branch, delete_branch, rename_branch, create_tag
    ├─ submodules.rs list_submodules
    ├─ config.rs     config_get, plus the secret redaction submodule URLs share
    ├─ objects.rs    count_objects
@@ -91,7 +94,13 @@ Results are meant to match the `git` CLI on the same repository, and the tests c
 ## Safety model
 
 - **Local only, by construction.** gix is compiled without any network transport feature, so fetch, push, clone and `ls-remote` can't be reached from any code path. `status.upstream` reports the configured upstream from local config only; nothing is ever fetched.
-- **Read-only.** Every current tool is read-only and annotated with `readOnlyHint`. `merge_preview` computes a full merge, but the blobs and trees it creates go to an in-memory object store that is dropped afterwards; a test checks that `.git/objects` is unchanged after a preview. As with `git merge-tree`, merge drivers and filters from the user's git configuration can run during the merge. The `--allow-write` flag is reserved for the write tools planned in Phase 3 of the [roadmap](../ROADMAP.md). Those tools will only be registered when the flag is given, so without it the model never sees them.
+- **Read-only by default.** Without `--allow-write`, every tool is read-only and annotated with `readOnlyHint`. `merge_preview` computes a full merge, but the blobs and trees it creates go to an in-memory object store that is dropped afterwards; a test checks that `.git/objects` is unchanged after a preview. As with `git merge-tree`, merge drivers and filters from the user's git configuration can run during the merge.
+- **Writes are opt-in and guarded.** The write tools live in their own router (`server/write.rs`), which `GitServer::new` adds only when `--allow-write` is given, so without the flag the model never sees them. Each write tool:
+  - runs every check before writing anything, so a refusal leaves the repository byte for byte unchanged (each tool has a test that snapshots the whole repository around a refused call);
+  - refuses to move HEAD, rewrite the index or touch the working tree while a merge, rebase, cherry-pick, revert or bisect is in progress (`tools::write::ensure_idle`);
+  - updates refs as compare-and-swap edits (`PreviousValue::MustExistAndMatch` / `MustNotExist`) under git's lock files, with git's reflog messages;
+  - defaults to `dry_run: true` when it can lose data, and is annotated with `destructiveHint` then;
+  - needs a committer identity from git config and refuses without one, rather than inventing it.
 - **Filesystem reads stay inside the repository.** Reads from the working tree (`read_file` with `rev: "worktree"`, and `grep`, which skips such paths) refuse anything under `.git/` and any path whose parent directory resolves outside the repository through a symlink. A symlink itself is reported by its target, as git stores it, and never followed.
 - **Secrets stay out of output.** `config_get` and `list_submodules` replace values that may be secrets with `<redacted>`: anything under `credential`, keys named like a password, token or secret, `http.extraHeader`, and the password in any URL. Configuration that gix derives from environment variables isn't listed at all, as in `git config --list`.
 - **Bounded output.** Every list is paginated and every content field has a byte budget, so a single call can't flood the client's context.

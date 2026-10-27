@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# End-to-end MCP check over stdio: initialize, list tools, call every tool once.
+# End-to-end MCP check over stdio: initialize, list tools, call every read tool once, then start a
+# second session with --allow-write and check the write tools appear only there.
 # Usage: scripts/smoke.sh <path-to-gitrs-mcp-binary> <repo> [file]
 # `file` is a tracked file for read_file, blame and file_history (default README.md).
 # Calls whose result depends on what the repo contains (a tag to show, ...) ask for something that
-# can't exist and must come back as a tool error, so the check works on any repository.
+# can't exist and must come back as a tool error, so the check works on any repository. Write tools
+# are only called in ways that can't change it.
 set -euo pipefail
 
 bin=${1:?binary path required}
@@ -49,12 +51,26 @@ requests=(
 last_id=29
 expect_error='17' # space-separated request ids that must return a tool error
 
-# Keep stdin open briefly so the server can answer before seeing EOF.
-{ printf '%s\n' "${requests[@]}"; sleep 1; } \
-  | "$bin" --repo "$repo" \
-  | python3 -c '
+write_tools='create_branch delete_branch rename_branch create_tag'
+write_requests=(
+  "${requests[@]:0:3}"
+  # A dry run (the default) on a branch that can't exist: refused, and nothing would change anyway.
+  "$(call 3 delete_branch '{"name":"gitrs-smoke-no-such-branch"}')"
+)
+
+# Run one server session: server flags, last request id, ids that must error, whether write tools must
+# be listed, then the requests.
+session() {
+  local flags=$1 last=$2 errors=$3 writes=$4
+  shift 4
+  # Keep stdin open briefly so the server can answer before seeing EOF.
+  # shellcheck disable=SC2086 # `flags` is a deliberately split list of options
+  { printf '%s\n' "$@"; sleep 1; } \
+    | "$bin" --repo "$repo" $flags \
+    | python3 -c '
 import json, sys
 last_id, want_error = int(sys.argv[1]), {int(i) for i in sys.argv[2].split()}
+write_tools, writes_expected = set(sys.argv[3].split()), sys.argv[4] == "yes"
 failed = False
 expected = set(range(1, last_id + 1))
 for line in sys.stdin:
@@ -65,9 +81,18 @@ for line in sys.stdin:
     if "error" in msg or bool(res.get("isError")) != (msg_id in want_error):
         print(f"unexpected outcome for request id {msg_id}", file=sys.stderr)
         failed = True
+    if "tools" in res:
+        listed = write_tools & {tool["name"] for tool in res["tools"]}
+        if listed != (write_tools if writes_expected else set()):
+            print(f"write tools listed: {sorted(listed)} (expected: {writes_expected})", file=sys.stderr)
+            failed = True
     print(json.dumps(msg, indent=2))
 if expected:
     print(f"no response for request ids {sorted(expected)}", file=sys.stderr)
     failed = True
 sys.exit(1 if failed else 0)
-' "$last_id" "$expect_error"
+' "$last" "$errors" "$write_tools" "$writes"
+}
+
+session "" "$last_id" "$expect_error" no "${requests[@]}"
+session --allow-write 3 3 yes "${write_requests[@]}"

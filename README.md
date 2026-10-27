@@ -5,12 +5,12 @@ A local-only Git [MCP](https://modelcontextprotocol.io) server written in Rust, 
 It lets AI assistants inspect a Git repository through typed tools with structured JSON output. It doesn't shell out to `git` and doesn't parse porcelain text.
 
 - **Local only, by construction.** gix is compiled without any network features, so fetch, push and clone can't happen.
-- **Read-only by default.** Write tools (coming in Phase 3) will exist only when you start the server with `--allow-write`.
+- **Read-only by default.** Write tools exist only when you start the server with `--allow-write`; without it they aren't even listed. They check everything before writing, refuse instead of overwriting work, and default to a dry run when data could be lost.
 - **Git-compatible.** Results match the `git` CLI on the same repository: the test suite checks each tool against real `git` output, and generated patches apply with `git apply`.
 - **Structured output.** Every tool returns JSON with a published output schema. Bad input, such as an unknown revision, comes back as a tool error the model can read and correct.
 - **Pure Rust.** It runs as a single static binary that speaks MCP over stdio, and it doesn't need `libgit2` or the `git` executable.
 
-> **Status:** early development. Phases 0–2 of the [roadmap](ROADMAP.md) are done: 27 read-only tools covering status, diffs, merge previews and conflicts, file contents, code search, ignore and attribute rules, history, blame, refs, tags, reflogs, stashes, notes, worktrees, submodules, config and object stats. Write tools come in Phase 3.
+> **Status:** early development. Phases 0–2 of the [roadmap](ROADMAP.md) are done: 27 read-only tools covering status, diffs, merge previews and conflicts, file contents, code search, ignore and attribute rules, history, blame, refs, tags, reflogs, stashes, notes, worktrees, submodules, config and object stats. Phase 3 (safe writes) is under way: with `--allow-write` the server adds branch and tag tools, with staging, committing and switching to follow.
 
 ## Install
 
@@ -97,6 +97,15 @@ Revision arguments accept anything `git rev-parse` does: SHAs and SHA prefixes, 
 | `config_get` | `key?` or `section?`, `scope?`, `limit?`, `skip?` | Config values with scope and file; credentials, tokens, passwords and auth headers redacted |
 | `count_objects` | none | Loose and packed object counts and sizes, packs, commit-graph and multi-pack-index presence |
 
+With `--allow-write`, these write tools are added:
+
+| Tool | Arguments | Does |
+|---|---|---|
+| `create_branch` | `name`, `start_point?` (default `HEAD`), `force?` | Creates a branch, like `git branch`; HEAD doesn't move |
+| `delete_branch` | `name`, `force?`, `dry_run?` (default **true**) | Deletes a branch that isn't checked out and is merged (or any with `force`), like `git branch -d` |
+| `rename_branch` | `old?` (default current), `new`, `force?` | Renames a branch with its reflog and config; HEAD follows |
+| `create_tag` | `name`, `target?`, `message?` (annotated when set), `force?` | Creates a lightweight or annotated tag |
+
 The full reference, with every argument, result field, error and a real example per tool, is in [docs/tools.md](docs/tools.md). Phase 3 adds safe write tools behind `--allow-write`; see [ROADMAP.md](ROADMAP.md).
 
 ## Documentation
@@ -143,6 +152,8 @@ src/
    ├─ attributes.rs check_ignore, check_attr
    ├─ blame.rs      blame
    ├─ worktrees.rs  list_worktrees
+   ├─ write.rs      shared guards for write tools (refusals, names, identity)
+   ├─ branches.rs   create_branch, delete_branch, rename_branch, create_tag
    ├─ submodules.rs list_submodules
    ├─ config.rs     config_get (with secret redaction)
    ├─ objects.rs    count_objects

@@ -6,6 +6,7 @@
 
 pub mod attributes;
 pub mod blame;
+pub mod branches;
 pub mod config;
 pub mod diff;
 pub mod files;
@@ -21,6 +22,7 @@ pub mod revision;
 pub mod status;
 pub mod submodules;
 pub mod worktrees;
+pub mod write;
 
 use anyhow::{Context, bail};
 use gix::bstr::BString;
@@ -403,7 +405,7 @@ pub(crate) mod testutil {
     pub fn fixture_repo() -> (tempfile::TempDir, gix::Repository) {
         let dir = tempfile::tempdir().unwrap();
         let git = |args: &[&str]| run_git(dir.path(), args);
-        git(&["init", "-q", "-b", "main"]);
+        init(dir.path());
         std::fs::write(dir.path().join("a.txt"), "one\n").unwrap();
         git(&["add", "a.txt"]);
         git(&["commit", "-q", "-m", "first commit"]);
@@ -418,9 +420,38 @@ pub(crate) mod testutil {
     /// An initialized repository on `main` with no commits.
     pub fn empty_repo() -> (tempfile::TempDir, gix::Repository) {
         let dir = tempfile::tempdir().unwrap();
-        run_git(dir.path(), &["init", "-q", "-b", "main"]);
+        init(dir.path());
         let repo = open(dir.path());
         (dir, repo)
+    }
+
+    /// `git init` on `main` with an identity in the local config: repositories opened by [`open`]
+    /// ignore the environment, and write tools need a committer for commits and reflogs.
+    fn init(dir: &Path) {
+        run_git(dir, &["init", "-q", "-b", "main"]);
+        run_git(dir, &["config", "user.name", "Test"]);
+        run_git(dir, &["config", "user.email", "test@example.com"]);
+    }
+
+    /// Every file below `dir` with its content, to prove an operation changed nothing on disk.
+    pub fn snapshot(dir: &Path) -> std::collections::BTreeMap<std::path::PathBuf, Vec<u8>> {
+        fn walk(dir: &Path, out: &mut std::collections::BTreeMap<std::path::PathBuf, Vec<u8>>) {
+            for entry in std::fs::read_dir(dir).unwrap() {
+                let path = entry.unwrap().path();
+                let meta = std::fs::symlink_metadata(&path).unwrap();
+                if meta.is_dir() {
+                    walk(&path, out);
+                } else if meta.is_symlink() {
+                    let target = std::fs::read_link(&path).unwrap();
+                    out.insert(path, target.display().to_string().into_bytes());
+                } else {
+                    out.insert(path.clone(), std::fs::read(&path).unwrap());
+                }
+            }
+        }
+        let mut out = std::collections::BTreeMap::new();
+        walk(dir, &mut out);
+        out
     }
 
     /// A bare clone of [`fixture_repo`].

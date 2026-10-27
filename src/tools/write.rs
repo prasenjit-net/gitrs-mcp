@@ -13,6 +13,9 @@ use gix::{
 
 use super::in_progress;
 
+const INDEX_LOCKED: &str = "the index is locked (`.git/index.lock` exists): another git process is \
+                            using it; retry when it has finished, or delete the lock file if no \
+                            git process is running";
 const NO_IDENTITY: &str = "no committer identity is configured; set `user.name` and `user.email` \
                            in the repository's git config (or globally), then retry";
 
@@ -55,10 +58,7 @@ pub fn update_index<T>(
         None,
         0,
     )
-    .context(
-        "the index is locked (`.git/index.lock` exists): another git process is using it; retry \
-         when it has finished, or delete the lock file if no git process is running",
-    )?;
+    .context(INDEX_LOCKED)?;
     let mut index = if path.is_file() {
         gix::index::File::at(&path, repo.object_hash(), false, Default::default())?
     } else {
@@ -91,10 +91,34 @@ pub fn update_index<T>(
     Ok(out)
 }
 
+/// Hold `.git/index.lock` without writing the index, so it can't change while it's read, as
+/// `git commit` does. The lock goes away when the marker is dropped.
+pub fn hold_index_lock(repo: &gix::Repository) -> anyhow::Result<gix::lock::Marker> {
+    gix::lock::Marker::acquire_to_hold_resource(
+        repo.index_path(),
+        gix::lock::acquire::Fail::Immediately,
+        None,
+        0,
+    )
+    .context(INDEX_LOCKED)
+}
+
 /// The identity to record as committer, and in reflogs.
 pub fn committer(repo: &gix::Repository) -> anyhow::Result<gix::actor::Signature> {
     let signature = repo.committer().context(NO_IDENTITY)??;
     Ok(signature.to_owned()?)
+}
+
+/// gix can't sign commits or tags, so when the repository asks for signatures (`key` is
+/// `commit.gpgSign` or `tag.gpgSign`) refuse rather than create an unsigned `what`.
+pub fn refuse_signing(repo: &gix::Repository, key: &str, what: &str) -> anyhow::Result<()> {
+    if repo.config_snapshot().boolean(key) == Some(true) {
+        bail!(
+            "`{key}` is enabled, but gitrs-mcp can't sign {what}; use git instead, or turn signing off \
+             for this repository"
+        );
+    }
+    Ok(())
 }
 
 /// `refs/heads/<name>` for a branch given as `name` (or already as `refs/heads/name`), validated

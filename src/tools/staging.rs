@@ -476,7 +476,8 @@ mod tests {
 
     use super::*;
     use crate::tools::testutil::{
-        bare_repo, empty_repo, fixture_repo, git_stdout, open, run_git, snapshot, try_git, write,
+        assert_unchanged, bare_repo, empty_repo, fixture_repo, git_stdout, ls_files, open,
+        porcelain, run_git, snapshot, try_git, twins, write,
     };
 
     fn stage_paths(repo: &gix::Repository, paths: &[&str]) -> anyhow::Result<IndexUpdateResult> {
@@ -507,28 +508,6 @@ mod tests {
                 all: false,
             },
         )
-    }
-
-    /// `git ls-files -s`: mode, blob, stage and path of every index entry.
-    fn ls_files(root: &Path) -> String {
-        git_stdout(root, &["-c", "core.quotePath=false", "ls-files", "-s"])
-    }
-
-    fn porcelain(root: &Path) -> String {
-        git_stdout(
-            root,
-            &["-c", "core.quotePath=false", "status", "--porcelain=v2"],
-        )
-    }
-
-    /// Two identical repositories, so one can be changed with gitrs and the other with git.
-    fn twins(setup: impl Fn(&Path)) -> [(tempfile::TempDir, gix::Repository); 2] {
-        [0, 1].map(|_| {
-            let (dir, _) = fixture_repo();
-            setup(dir.path());
-            let repo = open(dir.path());
-            (dir, repo)
-        })
     }
 
     /// Modified, deleted, new (nested and unicode), executable, symlink and ignored files.
@@ -755,7 +734,7 @@ mod tests {
         let before = snapshot(root);
         let err = stage_all(&repo).unwrap_err().to_string();
         assert!(err.contains("sparse index"), "{err}");
-        assert_eq!(snapshot(root), before);
+        assert_unchanged(root, &before);
     }
 
     #[test]
@@ -779,7 +758,7 @@ mod tests {
             let before = snapshot(root);
             let err = format!("{:#}", f().unwrap_err());
             assert!(err.contains(needle), "expected `{needle}` in: {err}");
-            assert_eq!(snapshot(root), before);
+            assert_unchanged(root, &before);
         };
         refused("matches no file", &|| stage_paths(&repo, &["nope.txt"]));
         refused("`paths`", &|| {
@@ -890,6 +869,6 @@ mod tests {
         let before = snapshot(root);
         let err = unstage_paths(&repo, &["a.txt"]).unwrap_err().to_string();
         assert!(err.contains("in progress"), "{err}");
-        assert_eq!(snapshot(root), before);
+        assert_unchanged(root, &before);
     }
 }

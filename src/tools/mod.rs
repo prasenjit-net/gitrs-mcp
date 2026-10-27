@@ -7,6 +7,7 @@
 pub mod attributes;
 pub mod blame;
 pub mod branches;
+pub mod commit;
 pub mod config;
 pub mod diff;
 pub mod files;
@@ -434,6 +435,47 @@ pub(crate) mod testutil {
         run_git(dir, &["config", "user.email", "test@example.com"]);
     }
 
+    /// Assert that everything below `dir` still matches `before` (from [`snapshot`]), naming the
+    /// paths that were added, removed or changed rather than dumping their bytes.
+    pub fn assert_unchanged(
+        dir: &Path,
+        before: &std::collections::BTreeMap<std::path::PathBuf, Vec<u8>>,
+    ) {
+        let after = snapshot(dir);
+        let changed: Vec<_> = before
+            .keys()
+            .chain(after.keys())
+            .filter(|path| before.get(*path) != after.get(*path))
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        assert!(changed.is_empty(), "these files changed: {changed:#?}");
+    }
+
+    /// Two identical fixture repositories after `setup`, so one can be changed with gitrs and the
+    /// other with the git command it mirrors, then compared with [`ls_files`] and [`porcelain`].
+    pub fn twins(setup: impl Fn(&Path)) -> [(tempfile::TempDir, gix::Repository); 2] {
+        [0, 1].map(|_| {
+            let (dir, _) = fixture_repo();
+            setup(dir.path());
+            let repo = open(dir.path());
+            (dir, repo)
+        })
+    }
+
+    /// `git ls-files -s`: mode, blob, stage and path of every index entry.
+    pub fn ls_files(root: &Path) -> String {
+        git_stdout(root, &["-c", "core.quotePath=false", "ls-files", "-s"])
+    }
+
+    /// `git status --porcelain=v2`: how git itself sees the index and working tree.
+    pub fn porcelain(root: &Path) -> String {
+        git_stdout(
+            root,
+            &["-c", "core.quotePath=false", "status", "--porcelain=v2"],
+        )
+    }
+
     /// Every file below `dir` with its content, to prove an operation changed nothing on disk.
     pub fn snapshot(dir: &Path) -> std::collections::BTreeMap<std::path::PathBuf, Vec<u8>> {
         fn walk(dir: &Path, out: &mut std::collections::BTreeMap<std::path::PathBuf, Vec<u8>>) {
@@ -470,6 +512,9 @@ pub(crate) mod testutil {
                 bare.to_str().unwrap(),
             ],
         );
+        // A clone doesn't copy the identity, which write tools need.
+        run_git(&bare, &["config", "user.name", "Test"]);
+        run_git(&bare, &["config", "user.email", "test@example.com"]);
         let repo = open(&bare);
         (dir, repo)
     }

@@ -10,7 +10,7 @@ It lets AI assistants inspect a Git repository through typed tools with structur
 - **Structured output.** Every tool returns JSON with a published output schema. Bad input, such as an unknown revision, comes back as a tool error the model can read and correct.
 - **Pure Rust.** It runs as a single static binary that speaks MCP over stdio, and it doesn't need `libgit2` or the `git` executable.
 
-> **Status:** early development. Phases 0–2 of the [roadmap](ROADMAP.md) are done: 27 read-only tools covering status, diffs, merge previews and conflicts, file contents, code search, ignore and attribute rules, history, blame, refs, tags, reflogs, stashes, notes, worktrees, submodules, config and object stats. Phase 3 (safe writes) is under way: with `--allow-write` the server adds branch, tag and staging tools, with committing and switching to follow.
+> **Status:** early development. Phases 0–2 of the [roadmap](ROADMAP.md) are done: 27 read-only tools covering status, diffs, merge previews and conflicts, file contents, code search, ignore and attribute rules, history, blame, refs, tags, reflogs, stashes, notes, worktrees, submodules, config and object stats. Phase 3 (safe writes) is under way: with `--allow-write` the server adds branch, tag, staging, commit and reset tools, with switching and restoring files to follow.
 
 ## Install
 
@@ -107,6 +107,8 @@ With `--allow-write`, these write tools are added:
 | `create_tag` | `name`, `target?`, `message?` (annotated when set), `force?` | Creates a lightweight or annotated tag |
 | `stage` | `paths` or `all` | Stages modifications, deletions and new files like `git add` (`-A` with `all`); resolves conflicts |
 | `unstage` | `paths` or `all` | Resets index entries to HEAD like `git restore --staged`; the worktree is untouched |
+| `commit` | `message`, `amend?`, `allow_empty?`, `author?` | Commits the index like `git commit -m`; reports hooks it didn't run; refuses when signing is required |
+| `reset` | `rev?` (default `HEAD`), `mode?`: `mixed` (default) or `soft` | Moves the branch like `git reset`; never touches the worktree; returns `previous` to undo |
 
 The full reference, with every argument, result field, error and a real example per tool, is in [docs/tools.md](docs/tools.md). Phase 3 adds safe write tools behind `--allow-write`; see [ROADMAP.md](ROADMAP.md).
 
@@ -157,6 +159,7 @@ src/
    ├─ write.rs      shared guards for write tools (refusals, names, identity)
    ├─ branches.rs   create_branch, delete_branch, rename_branch, create_tag
    ├─ staging.rs    stage, unstage
+   ├─ commit.rs     commit, reset
    ├─ submodules.rs list_submodules
    ├─ config.rs     config_get (with secret redaction)
    ├─ objects.rs    count_objects

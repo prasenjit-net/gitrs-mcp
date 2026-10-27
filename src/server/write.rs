@@ -121,6 +121,45 @@ impl GitServer {
             .await
             .map(Json)
     }
+
+    /// Record the staged changes as a new commit on the current branch, like `git commit -m`
+    /// (`amend: true` replaces the last commit instead). Uses the configured identity; `author` can
+    /// credit someone else. Refuses an empty commit unless `allow_empty`, unresolved conflicts, and
+    /// repositories that require signed commits. Hooks aren't run; existing ones are reported.
+    #[tool(annotations(
+        title = "Commit",
+        read_only_hint = false,
+        destructive_hint = false,
+        idempotent_hint = false
+    ))]
+    async fn commit(
+        &self,
+        Parameters(args): Parameters<tools::commit::CommitArgs>,
+    ) -> Result<Json<tools::commit::CommitResult>, String> {
+        self.repo
+            .run(move |r| tools::commit::commit(r, args))
+            .await
+            .map(Json)
+    }
+
+    /// Move the current branch (or detached HEAD) to another commit, like `git reset`: `mixed` (the
+    /// default) also resets the index so the undone changes become unstaged; `soft` keeps them staged.
+    /// The working tree is never touched. The result's `previous` undoes it.
+    #[tool(annotations(
+        title = "Reset",
+        read_only_hint = false,
+        destructive_hint = false,
+        idempotent_hint = false
+    ))]
+    async fn reset(
+        &self,
+        Parameters(args): Parameters<tools::commit::ResetArgs>,
+    ) -> Result<Json<tools::commit::ResetResult>, String> {
+        self.repo
+            .run(move |r| tools::commit::reset(r, args))
+            .await
+            .map(Json)
+    }
 }
 
 #[cfg(test)]
@@ -194,5 +233,31 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(unstaged.0.staged_total, 0);
+
+        server
+            .stage(Parameters(tools::staging::StageArgs {
+                paths: vec![],
+                all: true,
+            }))
+            .await
+            .unwrap();
+        let committed = server
+            .commit(Parameters(tools::commit::CommitArgs {
+                message: "Through MCP".into(),
+                amend: false,
+                allow_empty: false,
+                author: None,
+            }))
+            .await
+            .unwrap();
+        assert_eq!(committed.0.commit.summary, "Through MCP");
+        let reset = server
+            .reset(Parameters(tools::commit::ResetArgs {
+                rev: Some("HEAD~1".into()),
+                mode: tools::commit::ResetMode::Soft,
+            }))
+            .await
+            .unwrap();
+        assert_eq!(reset.0.previous, committed.0.commit.id);
     }
 }

@@ -11,12 +11,12 @@ _Last updated 2026-10-27._
 | 0 Scaffold | ✅ Done: 4 tools |
 | 1 Core read | ✅ Done: 9 tools, each checked against the git CLI |
 | 2 Deep read and inspection | ✅ Done: 14 tools, each checked against the git CLI |
-| 3 Safe writes | 🚧 In progress: 6 of 10 tools |
+| 3 Safe writes | 🚧 In progress: 8 of 10 tools |
 | 4 History rewriting | Planned |
 | 5 MCP-native extras | Planned |
 | 6 Hardening and release | Planned |
 
-The server has 27 read-only tools, plus 6 write tools registered only with `--allow-write`. 163 unit tests and the end-to-end smoke test pass, with 95.7% line coverage.
+The server has 27 read-only tools, plus 8 write tools registered only with `--allow-write`. 171 unit tests and the end-to-end smoke test pass, with 95.9% line coverage.
 
 ## Design principles
 
@@ -52,6 +52,7 @@ src/
    ├─ write.rs      guards shared by write tools
    ├─ branches.rs   create_branch, delete_branch, rename_branch, create_tag
    ├─ staging.rs    stage, unstage
+   ├─ commit.rs     commit, reset
    ├─ submodules.rs list_submodules
    ├─ config.rs     config_get
    ├─ objects.rs    count_objects
@@ -238,14 +239,14 @@ Shared guarantees for every tool in this phase:
 |---|---|---|---|
 | `stage` ✅ | `paths[]` / `all` → add to index (adds, modifications, deletions) | build an index from the status iterator, `write_blob`, `index.write()` | respect `.gitattributes` filters (`filter` pipeline) and executable bits |
 | `unstage` ✅ | `paths[]` → reset index entries to HEAD | rewrite entries from the HEAD tree | |
-| `commit` | `message`, `amend = false`, `allow_empty = false`, `author?` → new commit | `index.write_tree` + `repo.commit(...)` / `commit_as` | **gap:** hooks (`pre-commit`, `commit-msg`) and signing aren't run by gix. Either document this or optionally shell out to the hooks (opt-in `--run-hooks`) |
+| `commit` ✅ | `message`, `amend = false`, `allow_empty = false`, `author?` → new commit | `index.write_tree` + `repo.commit(...)` / `commit_as` | **gap:** hooks (`pre-commit`, `commit-msg`) and signing aren't run by gix. Either document this or optionally shell out to the hooks (opt-in `--run-hooks`) |
 | `create_branch` ✅ | `name`, `start_point = HEAD`, `force = false` | `edit_reference` with `MustNotExist` | name validated by `gix-validate` |
 | `delete_branch` ✅ | `name`, `force = false`; non-force refuses unmerged branches | `delete_local_branches_if_unchanged` | `destructive_hint`, `dry_run` default |
 | `rename_branch` ✅ | `old`, `new` | two ref edits + reflog move | |
 | `create_tag` ✅ | `name`, `target`, `message?` (annotated if set) | `repo.tag(...)` / `tag_reference` | |
 | `switch` | `branch` or `rev` (detached), `create?` | update HEAD, then check out the tree with `checkout_options` + `gix-worktree-state` | refuse if the worktree has changes that would be overwritten (compute via status ∩ changed paths) |
 | `restore` | `paths[]`, `source = index \| HEAD \| rev`, `staged` | per-file checkout | `destructive_hint`, `dry_run` default |
-| `reset` | `mode: soft \| mixed` (no `hard` in this phase), `rev` | move the branch ref, rebuild the index for `mixed` | `hard` waits until Phase 4 with `dry_run` |
+| `reset` ✅ | `mode: soft \| mixed` (no `hard` in this phase), `rev` | move the branch ref, rebuild the index for `mixed` | `hard` waits until Phase 4 with `dry_run` |
 
 **Exit criteria:** an agent can run the full local edit, stage, commit and branch loop. Every write tool has a test proving it refuses on a dirty or conflicting state and leaves the repo unchanged on refusal.
 
@@ -265,6 +266,14 @@ Shared guarantees for every tool in this phase:
 - **`unstage`.**
   - Takes `paths` or `all`. Restored entries get a zero stat, so git re-reads the file rather than trusting a stat that matched the replaced entry.
   - Refused during an in-progress operation.
+- **`commit`.**
+  - Hooks aren't run, and `--run-hooks` wasn't added. Instead `hooks_skipped` reports the commit hooks present (`core.hooksPath` or `.git/hooks`), so the agent knows checks were skipped.
+  - With `commit.gpgSign` set, it refuses rather than creating unsigned commits; `create_tag` does the same for annotated tags with `tag.gpgSign`.
+  - The tree is built from the index (intent-to-add entries left out) in an in-memory object store first, so refusals such as "nothing to commit" write no objects. The index lock is held throughout, as `git commit` does.
+  - Reflog messages match git (`commit:`, `commit (initial):`, `commit (amend):`). `amend` keeps the original author unless `author` is given.
+- **`reset`.**
+  - `rev` defaults to `HEAD`. A mixed reset moves HEAD inside the index update, so if the ref can't be moved the index stays as it was.
+  - A soft reset works in a bare repository and refuses an index with unresolved conflicts, as git does. Not marked destructive: the working tree is never touched, and `previous` undoes it.
 - **Index writes.**
   - gix's `File::write` takes the lock only when writing and keeps a stale cache-tree. `tools::write::update_index` locks before reading instead, and writes only the end-of-index-entry extension. A split index arrives merged with its shared index and is written back whole; a sparse index is refused.
 - **`create_tag`.** Added `force`; messages get git's whitespace cleanup. The result reuses `show_tag`'s shape. No reflog is written for tags, as in git.
@@ -346,7 +355,7 @@ gix has no sequencer, so this phase is where we build our own logic on its primi
 | 0 Scaffold | 4 | — | ✅ done |
 | 1 Core read | 9 | ~4.9k lines including tests (planned ~2–3k) | ✅ done |
 | 2 Deep read | 14 | ~2k LOC | ✅ done |
-| 3 Safe writes | 10 | ~2–3k LOC (index writing and checkout safety are the hard parts) | 🚧 6 of 10 |
+| 3 Safe writes | 10 | ~2–3k LOC (index writing and checkout safety are the hard parts) | 🚧 8 of 10 |
 | 4 Rewriting | 8 | ~3–4k LOC (sequencer and stash) | planned |
 | 5 MCP extras | resources, prompts, progress, multi-repo | ~1.5k LOC | planned |
 | 6 Hardening | — | ongoing | planned |

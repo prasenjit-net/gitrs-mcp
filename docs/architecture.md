@@ -33,6 +33,7 @@ src/
    ├─ write.rs      guards shared by the write tools: refusals, name validation, identity, message cleanup
    ├─ branches.rs   create_branch, delete_branch, rename_branch, create_tag
    ├─ staging.rs    stage, unstage
+   ├─ commit.rs     commit, reset
    ├─ submodules.rs list_submodules
    ├─ config.rs     config_get, plus the secret redaction submodule URLs share
    ├─ objects.rs    count_objects
@@ -101,7 +102,7 @@ Results are meant to match the `git` CLI on the same repository, and the tests c
   - refuses to move HEAD, rewrite the index or touch the working tree while a merge, rebase, cherry-pick, revert or bisect is in progress (`tools::write::ensure_idle`);
   - updates refs as compare-and-swap edits (`PreviousValue::MustExistAndMatch` / `MustNotExist`) under git's lock files, with git's reflog messages;
   - defaults to `dry_run: true` when it can lose data, and is annotated with `destructiveHint` then;
-  - needs a committer identity from git config and refuses without one, rather than inventing it;
+  - needs a committer identity from git config and refuses without one, rather than inventing it, and refuses to create unsigned commits or annotated tags when `commit.gpgSign` / `tag.gpgSign` asks for signatures;
   - edits the index through `tools::write::update_index`, which takes `.git/index.lock` before reading (so a concurrent `git add` isn't lost), applies the edit, and writes the index back without the cache-tree, untracked-cache and fsmonitor extensions, which would be stale and which git rebuilds. A split index is merged with its shared index when read and written back whole; a sparse index is refused. When `stage` hashes files it runs the same clean filters and line-ending conversion as `git add`.
 - **Filesystem reads stay inside the repository.** Reads from the working tree (`read_file` with `rev: "worktree"`, and `grep`, which skips such paths) refuse anything under `.git/` and any path whose parent directory resolves outside the repository through a symlink. A symlink itself is reported by its target, as git stores it, and never followed.
 - **Secrets stay out of output.** `config_get` and `list_submodules` replace values that may be secrets with `<redacted>`: anything under `credential`, keys named like a password, token or secret, `http.extraHeader`, and the password in any URL. Configuration that gix derives from environment variables isn't listed at all, as in `git config --list`.

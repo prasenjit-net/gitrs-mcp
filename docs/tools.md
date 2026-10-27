@@ -1,6 +1,6 @@
 # Tool reference
 
-gitrs-mcp exposes 27 read-only tools, plus 6 write tools that are only available when the server runs with `--allow-write`. This page covers each one: what it does, its arguments and defaults, the fields it returns, the errors it reports, and a real request and response.
+gitrs-mcp exposes 27 read-only tools, plus 8 write tools that are only available when the server runs with `--allow-write`. This page covers each one: what it does, its arguments and defaults, the fields it returns, the errors it reports, and a real request and response.
 
 - [Conventions](#conventions)
 - [Shared types](#shared-types)
@@ -9,7 +9,7 @@ gitrs-mcp exposes 27 read-only tools, plus 6 write tools that are only available
 - Files: [`read_file`](#read_file), [`list_tree`](#list_tree), [`blame`](#blame), [`grep`](#grep), [`check_ignore`](#check_ignore), [`check_attr`](#check_attr)
 - History: [`log`](#log), [`show_commit`](#show_commit), [`file_history`](#file_history), [`search_commits`](#search_commits), [`notes`](#notes)
 - Repository setup: [`list_worktrees`](#list_worktrees), [`list_submodules`](#list_submodules), [`config_get`](#config_get), [`count_objects`](#count_objects)
-- [Write tools](#write-tools) (only with `--allow-write`): [`create_branch`](#create_branch), [`delete_branch`](#delete_branch), [`rename_branch`](#rename_branch), [`create_tag`](#create_tag), [`stage`](#stage), [`unstage`](#unstage)
+- [Write tools](#write-tools) (only with `--allow-write`): [`create_branch`](#create_branch), [`delete_branch`](#delete_branch), [`rename_branch`](#rename_branch), [`create_tag`](#create_tag), [`stage`](#stage), [`unstage`](#unstage), [`commit`](#commit), [`reset`](#reset)
 
 ## Conventions
 
@@ -1850,4 +1850,92 @@ Undo staged changes, like `git restore --staged <paths>` (or `git reset` with `a
 
 ```json
 {"changed": [{"change": "added", "path": "src/main.rs"}], "changed_count": 1, "skipped": [], "staged_total": 0}
+```
+
+## `commit`
+
+Record the staged changes as a new commit on the current branch, like `git commit -m`. With `amend: true` the last commit is replaced instead, keeping its parents and, unless `author` is given, its author. The message gets git's whitespace cleanup.
+
+It refuses when nothing would change (the tree equals the parent's) unless `allow_empty` is set, when the index has unresolved conflicts, while an operation is in progress, and when `commit.gpgSign` is set, because gitrs-mcp can't sign commits. Intent-to-add entries (`git add -N`) are left out, as git does.
+
+Hooks aren't run. `hooks_skipped` lists the commit hooks (`pre-commit`, `prepare-commit-msg`, `commit-msg`, `post-commit`) present in the hooks directory (`core.hooksPath` or `.git/hooks`), so their checks can be run another way.
+
+**Arguments**
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `message` | string | required | Commit message: a summary line, optionally a blank line and a body. |
+| `amend` | boolean | `false` | Replace the current commit instead of adding one. |
+| `allow_empty` | boolean | `false` | Create the commit even if it records no change from its parent. |
+| `author` | object | configured identity | `{name, email}` to record as author instead. The committer is always the configured identity. |
+
+**Result**
+
+| Field | Type | Description |
+|---|---|---|
+| `id`, `short_id`, `summary`, `author`, `parents` | | The new commit, as a [LogEntry](#shared-types). |
+| `tree` | string | Full SHA of the commit's tree. |
+| `branch` | string \| null | Short name of the branch that now points to the commit; `null` when HEAD is detached. |
+| `amended` | string \| null | With `amend`, the full SHA of the commit that was replaced. It stays reachable through the reflog. |
+| `hooks_skipped` | string[] | Commit hooks in the repository that `git commit` would have run. |
+
+**Errors:** an empty message; nothing to commit; unresolved conflicts; an operation in progress; `commit.gpgSign` enabled; `amend` with no commit yet; an invalid `author`; no committer identity; the index is locked; a bare repository.
+
+**Example**
+
+```json
+{"message": "Add a command-line entry point\n\nPrints a greeting for the world."}
+```
+
+```json
+{
+  "amended": null,
+  "author": {"email": "ada@example.com", "name": "Ada Lovelace", "offset": 0, "time": 1791200000},
+  "branch": "main",
+  "hooks_skipped": [],
+  "id": "eb7191c095224abc7ba5b04b67be0d211abd1055",
+  "parents": ["48ce6b19c89fc67695e4e723b8192fb167fb8f00"],
+  "short_id": "eb7191c",
+  "summary": "Add a command-line entry point",
+  "tree": "0080a36e507221b236f152ab63d574d2fe8c23a1"
+}
+```
+
+## `reset`
+
+Move the current branch (or a detached HEAD) to another commit, like `git reset`. With `mixed` (the default) the index is reset to that commit too, so the changes of the commits left behind show up as unstaged; with `soft` the index keeps them staged. The working tree is never touched, and `previous` is the commit to reset back to; it also stays in the reflog. A hard reset, which overwrites the working tree, isn't available. With no `rev`, a mixed reset just unstages everything.
+
+**Arguments**
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `rev` | string | `HEAD` | Commit to move to, e.g. `HEAD~1` or a SHA. |
+| `mode` | `soft` \| `mixed` | `mixed` | Whether the index is reset too. |
+
+**Result**
+
+| Field | Type | Description |
+|---|---|---|
+| `mode` | `soft` \| `mixed` | The mode applied. |
+| `previous` | string | Full SHA HEAD pointed to before. |
+| `head` | string | Full SHA HEAD points to now. |
+| `branch` | string \| null | Short name of the branch that moved; `null` when HEAD is detached. |
+| `staged_total` | integer | Number of paths that now differ between HEAD and the index. |
+
+**Errors:** an unknown revision; no commits yet; an operation in progress; a soft reset with unresolved conflicts; a mixed reset in a bare repository; no committer identity; the index is locked.
+
+**Example**
+
+```json
+{"rev": "HEAD~1"}
+```
+
+```json
+{
+  "branch": "main",
+  "head": "41dad034dd469fe144a58a71bcd86453cd70ade1",
+  "mode": "mixed",
+  "previous": "48ce6b19c89fc67695e4e723b8192fb167fb8f00",
+  "staged_total": 0
+}
 ```

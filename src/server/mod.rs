@@ -89,13 +89,15 @@ mod tests {
     use super::*;
     use crate::tools::testutil::fixture_repo;
 
-    const WRITE_TOOLS: [&str; 6] = [
+    const WRITE_TOOLS: [&str; 8] = [
         "create_branch",
         "delete_branch",
         "rename_branch",
         "create_tag",
         "stage",
         "unstage",
+        "commit",
+        "reset",
     ];
 
     fn server(path: &std::path::Path, allow_write: bool) -> GitServer {

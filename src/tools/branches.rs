@@ -14,7 +14,9 @@ use serde::{Deserialize, Serialize};
 use super::{
     refs::{ShowTagArgs, ShowTagResult, show_tag},
     resolve_commit, resolve_object,
-    write::{branch_ref, checked_out_at, clean_message, committer, ensure_idle, tag_ref},
+    write::{
+        branch_ref, checked_out_at, clean_message, committer, ensure_idle, refuse_signing, tag_ref,
+    },
 };
 
 fn default_true() -> bool {
@@ -378,6 +380,7 @@ pub fn create_tag(repo: &gix::Repository, args: CreateTagArgs) -> anyhow::Result
     };
     match args.message.as_deref() {
         Some(message) => {
+            refuse_signing(repo, "tag.gpgSign", "tags")?;
             let message = clean_message(message)
                 .context("`message` is empty; pass some text, or omit it for a lightweight tag")?;
             let mut time = gix::date::parse::TimeBuf::default();
@@ -411,7 +414,8 @@ mod tests {
 
     use super::*;
     use crate::tools::testutil::{
-        empty_repo, fixture_repo, git_stdout, open, run_git, snapshot, try_git, write,
+        assert_unchanged, empty_repo, fixture_repo, git_stdout, open, run_git, snapshot, try_git,
+        write,
     };
 
     fn rev(root: &Path, spec: &str) -> String {
@@ -447,11 +451,7 @@ mod tests {
         let before = snapshot(root);
         let err = format!("{:#}", f().unwrap_err());
         assert!(err.contains(needle), "expected `{needle}` in: {err}");
-        assert_eq!(
-            snapshot(root),
-            before,
-            "a refused call must not change anything"
-        );
+        assert_unchanged(root, &before);
     }
 
     #[test]
@@ -532,7 +532,7 @@ mod tests {
         let res = delete_branch(&repo, parsed).unwrap();
         assert!(res.dry_run && !res.deleted && res.merged);
         assert_eq!(res.merged_into, "HEAD");
-        assert_eq!(snapshot(root), before);
+        assert_unchanged(root, &before);
 
         let res = delete(&repo, "feature", false, false).unwrap();
         assert!(res.deleted);
@@ -778,6 +778,11 @@ mod tests {
         });
         refused(root, "cannot resolve", || {
             tag(&repo, "v9", Some("nope"), None, false)
+        });
+        run_git(root, &["config", "tag.gpgSign", "true"]);
+        let signing = open(root);
+        refused(root, "can't sign tags", || {
+            tag(&signing, "v9", None, Some("signed?"), false)
         });
     }
 }

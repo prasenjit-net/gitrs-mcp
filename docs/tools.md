@@ -1,11 +1,11 @@
 # Tool reference
 
-gitrs-mcp exposes 25 read-only tools. This page covers each one: what it does, its arguments and defaults, the fields it returns, the errors it reports, and a real request and response.
+gitrs-mcp exposes 27 read-only tools. This page covers each one: what it does, its arguments and defaults, the fields it returns, the errors it reports, and a real request and response.
 
 - [Conventions](#conventions)
 - [Shared types](#shared-types)
 - Repository and refs: [`repo_info`](#repo_info), [`list_refs`](#list_refs), [`rev_parse`](#rev_parse), [`compare_refs`](#compare_refs), [`describe`](#describe), [`show_tag`](#show_tag), [`reflog`](#reflog), [`list_stashes`](#list_stashes)
-- Local changes: [`status`](#status), [`diff`](#diff)
+- Local changes and merges: [`status`](#status), [`diff`](#diff), [`conflicts`](#conflicts), [`merge_preview`](#merge_preview)
 - Files: [`read_file`](#read_file), [`list_tree`](#list_tree), [`blame`](#blame), [`grep`](#grep), [`check_ignore`](#check_ignore), [`check_attr`](#check_attr)
 - History: [`log`](#log), [`show_commit`](#show_commit), [`file_history`](#file_history), [`search_commits`](#search_commits), [`notes`](#notes)
 - Repository setup: [`list_worktrees`](#list_worktrees), [`list_submodules`](#list_submodules), [`config_get`](#config_get), [`count_objects`](#count_objects)
@@ -26,7 +26,7 @@ These rules hold for every tool.
 
 - **Output** is JSON in `structuredContent`, described by each tool's published `outputSchema`. The same JSON is also sent as text content for clients that don't read structured output. SHAs are always full 40-character hex unless a field is named `short_id`.
 
-The examples come from a small demo repository, which [`scripts/demo-repo.sh`](../scripts/demo-repo.sh) builds with fixed dates so that its SHAs are reproducible: `main` has three commits (`Initial commit`, `Add shout`, `Document usage`) and an annotated tag `v0.1.0` on `Add shout`; `feature` branches from `Add shout` with one commit, `Add farewell`. `Document usage` has a note, and there is one stash. `vendor/assets` is a submodule, `origin` is a remote whose URL contains a password (never fetched), and `demo-review` is a locked linked worktree on `feature`. The working tree has an unstaged edit to `src/lib.rs`, a staged new file `src/main.rs`, and an untracked `notes.txt`. Each example shows the call's `arguments` and the `structuredContent` it returned. Local paths are shortened to `/path/to`.
+The examples come from a small demo repository, which [`scripts/demo-repo.sh`](../scripts/demo-repo.sh) builds with fixed dates so that its SHAs are reproducible: `main` has three commits (`Initial commit`, `Add shout`, `Document usage`) and an annotated tag `v0.1.0` on `Add shout`; `feature` branches from `Add shout` with one commit, `Add farewell`. `Document usage` has a note, and there is one stash. `vendor/assets` is a submodule, `origin` is a remote whose URL contains a password (never fetched), and `demo-review` is a locked linked worktree on `feature`, in the middle of merging `polish`, a branch from `Add shout` that adds its own `src/farewell.rs`. The working tree has an unstaged edit to `src/lib.rs`, a staged new file `src/main.rs`, and an untracked `notes.txt`. Each example shows the call's `arguments` and the `structuredContent` it returned. Local paths are shortened to `/path/to`.
 
 ## Shared types
 
@@ -120,6 +120,7 @@ List branches and/or tags with the commit each points to.
   "refs": [
     {"is_head": false, "name": "refs/heads/feature", "short_name": "feature", "target": "e9383dc8fce1955c63812c2365edbff4efdffce4"},
     {"is_head": true, "name": "refs/heads/main", "short_name": "main", "target": "48ce6b19c89fc67695e4e723b8192fb167fb8f00"},
+    {"is_head": false, "name": "refs/heads/polish", "short_name": "polish", "target": "10fd2e0634518dfc3f069fe8de98d03b71c333ef"},
     {"is_head": false, "name": "refs/notes/commits", "short_name": "notes/commits", "target": "d88da5dd41aab8e6ed9a334203b8caff338e3549"},
     {"is_head": false, "name": "refs/stash", "short_name": "refs/stash", "target": "dbcd799721ed9636188e6497d1bad21738471383"},
     {"is_head": false, "name": "refs/tags/v0.1.0", "short_name": "v0.1.0", "target": "41dad034dd469fe144a58a71bcd86453cd70ade1"}
@@ -621,6 +622,163 @@ comparing a revision with the working tree isn't supported; pass `to` for two re
 ```
 
 ---
+
+## `conflicts`
+
+Unresolved conflicts in the index, like `git ls-files -u` combined with the conflict kinds `git status` shows. Use it during a merge, rebase, cherry-pick, revert or `git stash pop` to see, for each conflicted file, which sides changed it and the base, ours and theirs versions. The working-tree file with conflict markers is available through `read_file` with `rev: "worktree"`.
+
+**Arguments**
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `include_content` | boolean | `false` | Include each version's text in `content`. Binary files and submodules never have content. |
+| `max_bytes` | integer | 65536 (max 1048576) | Byte budget shared by all `content` fields in the response. |
+| `limit` | integer | 100 (max 1000) | Maximum conflicted files to return. |
+| `skip` | integer | 0 | Conflicted files to skip first, for pagination. |
+
+**Result**
+
+| Field | Type | Description |
+|---|---|---|
+| `in_progress` | string \| null | The operation in progress, e.g. `Merge`, `Rebase`, `CherryPick` or `Revert`; `null` when none. |
+| `files[]` | ConflictFile[] | Conflicted files ordered by path, described below. Empty when the index has no conflicts. |
+| `total` | integer | Number of conflicted files before pagination. |
+| `truncated` | boolean | True if more conflicted files exist past this page. |
+
+**ConflictFile**
+
+| Field | Type | Description |
+|---|---|---|
+| `path` | string | Path relative to the repository root. |
+| `conflict` | string | Which sides touched the path, as `git status` reports it: `both_modified` (UU), `both_added` (AA), `both_deleted` (DD), `added_by_us` (AU), `added_by_them` (UA), `deleted_by_us` (DU), `deleted_by_them` (UD). |
+| `base` | ConflictVersion \| null | The common ancestor's version (index stage 1); `null` when the path didn't exist there. |
+| `ours` | ConflictVersion \| null | Our version (stage 2): the branch being merged into, or in a rebase the commits being rebased onto. `null` when our side deleted the path. |
+| `theirs` | ConflictVersion \| null | Their version (stage 3): the branch being merged, or the commit a rebase, cherry-pick or revert is replaying. `null` when their side deleted the path. |
+
+**ConflictVersion**
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Full SHA of the version's blob (for a submodule, the commit it records). |
+| `mode` | string | Git file mode in octal, e.g. `100644`. |
+| `content` | string \| null | The text when `include_content` is set; `null` without it, for binary files and submodules, and once the byte budget is used up. |
+| `content_truncated` | boolean | True when `content` was cut at the byte budget, or left out because the budget was used up. |
+
+**Example**, served from the demo's linked worktree `demo-review`, which is in the middle of merging `polish` into `feature`:
+
+```json
+{}
+```
+
+```json
+{
+  "files": [
+    {
+      "base": null,
+      "conflict": "both_added",
+      "ours": {"content": null, "content_truncated": false, "id": "2b0aa2832e52266607f6638bf8398ab340432063", "mode": "100644"},
+      "path": "src/farewell.rs",
+      "theirs": {"content": null, "content_truncated": false, "id": "8a52adffc90085fcd89b0cd9943d686a1d6c6bf3", "mode": "100644"}
+    }
+  ],
+  "in_progress": "Merge",
+  "total": 1,
+  "truncated": false
+}
+```
+
+## `merge_preview`
+
+Preview merging `theirs` into `ours` without changing anything, like `git merge-tree --write-tree`. It reports whether the merge is clean, already up to date or a fast-forward, which merge bases it used, the tree a merge commit would record, and every file that would be left conflicted, in the same shape `conflicts` uses after a real merge. Use it to answer "is it safe to merge X into Y?".
+
+The merge runs entirely in memory: merged files, the result tree and any virtual merge base (for criss-cross histories, merged recursively as git does) go to an in-memory object store and are discarded, so the repository is never written to. As with `git merge-tree`, custom merge drivers and filters from your git configuration (`merge.<driver>.driver`, `filter.<name>.*`) are run if `.gitattributes` selects them.
+
+**Arguments**
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `ours` | string | `HEAD` | The branch you would merge into. Any commit-ish works. |
+| `theirs` | string | required | The branch or commit you would merge. |
+| `allow_unrelated` | boolean | `false` | Merge histories that share no commit, like `--allow-unrelated-histories`. |
+| `include_content` | boolean | `false` | Include each version's text for the conflicted files. |
+| `max_bytes` | integer | 65536 (max 1048576) | Byte budget shared by all `content` fields. |
+| `limit` | integer | 100 (max 1000) | Maximum conflicted files to return. |
+| `skip` | integer | 0 | Conflicted files to skip first, for pagination. |
+
+**Result**
+
+| Field | Type | Description |
+|---|---|---|
+| `ours` | string | Full SHA `ours` resolved to. |
+| `theirs` | string | Full SHA `theirs` resolved to. |
+| `merge_bases` | string[] | The merge bases used: several for criss-cross histories, empty for unrelated ones. |
+| `clean` | boolean | True when the merge completes without conflicts. |
+| `up_to_date` | boolean | True when `theirs` is already part of `ours`, so merging changes nothing. |
+| `fast_forward` | boolean | True when `ours` is part of `theirs`, so `git merge` would fast-forward instead of creating a merge commit. |
+| `tree` | string | SHA of the merged tree, as `git merge-tree --write-tree` prints it; conflicted files in it contain conflict markers labelled with `ours` and `theirs`. It is computed in memory and not stored, so other tools can't read it. |
+| `conflicts[]` | ConflictFile[] | Files that would be left conflicted, ordered by path (see [`conflicts`](#conflicts)). |
+| `total` | integer | Number of conflicted files before pagination. |
+| `truncated` | boolean | True if more conflicted files exist past this page. |
+
+**Errors:** an unknown revision; unrelated histories without `allow_unrelated`: `` `main` and `island` share no history; set `allow_unrelated: true` to preview merging them anyway, like `git merge --allow-unrelated-histories` ``.
+
+**Examples**
+
+```json
+{"ours": "feature", "theirs": "polish", "include_content": true}
+```
+
+```json
+{
+  "clean": false,
+  "conflicts": [
+    {
+      "base": null,
+      "conflict": "both_added",
+      "ours": {
+        "content": "pub fn farewell(name: &str) -> String {\n    format!(\"Goodbye, {name}.\")\n}\n",
+        "content_truncated": false,
+        "id": "2b0aa2832e52266607f6638bf8398ab340432063",
+        "mode": "100644"
+      },
+      "path": "src/farewell.rs",
+      "theirs": {
+        "content": "pub fn farewell(name: &str) -> String {\n    format!(\"See you, {name}!\")\n}\n",
+        "content_truncated": false,
+        "id": "8a52adffc90085fcd89b0cd9943d686a1d6c6bf3",
+        "mode": "100644"
+      }
+    }
+  ],
+  "fast_forward": false,
+  "merge_bases": ["41dad034dd469fe144a58a71bcd86453cd70ade1"],
+  "ours": "e9383dc8fce1955c63812c2365edbff4efdffce4",
+  "theirs": "10fd2e0634518dfc3f069fe8de98d03b71c333ef",
+  "total": 1,
+  "tree": "61c29199ffe9b6f113481369135668093456baf2",
+  "truncated": false,
+  "up_to_date": false
+}
+```
+
+```json
+{"theirs": "feature"}
+```
+
+```json
+{
+  "clean": true,
+  "conflicts": [],
+  "fast_forward": false,
+  "merge_bases": ["41dad034dd469fe144a58a71bcd86453cd70ade1"],
+  "ours": "48ce6b19c89fc67695e4e723b8192fb167fb8f00",
+  "theirs": "e9383dc8fce1955c63812c2365edbff4efdffce4",
+  "total": 0,
+  "tree": "c99745e56af11e76205576f5030707e3de3fbcd2",
+  "truncated": false,
+  "up_to_date": false
+}
+```
 
 ## `read_file`
 
@@ -1437,8 +1595,8 @@ Statistics for the repository's object database, like `git count-objects -v`, wi
 {
   "alternates": 0,
   "commit_graph": false,
-  "loose_bytes": 118784,
-  "loose_objects": 29,
+  "loose_bytes": 163840,
+  "loose_objects": 40,
   "multi_pack_index": false,
   "pack_bytes": 0,
   "packed_objects": 0,

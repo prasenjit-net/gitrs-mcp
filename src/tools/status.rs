@@ -2,13 +2,13 @@ use gix::{
     dir::{entry::Kind as DiskKind, entry::Status as DirStatus, walk::EmissionMode},
     status::{
         UntrackedFiles, index_worktree,
-        plumbing::index_as_worktree::{Change, Conflict, EntryStatus},
+        plumbing::index_as_worktree::{Change, EntryStatus},
     },
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::{ChangeKind, diff::index_changes, page_limit, pathspec_patterns};
+use super::{ChangeKind, ConflictKind, diff::index_changes, page_limit, pathspec_patterns};
 
 const DEFAULT_STATUS_LIMIT: usize = 500;
 const MAX_STATUS_LIMIT: usize = 5000;
@@ -50,33 +50,6 @@ impl StatusEntry {
             path: path.to_string(),
             change,
             old_path: None,
-        }
-    }
-}
-
-/// Which sides of a merge touched a conflicted path, as in `git status`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum ConflictKind {
-    BothModified,
-    BothAdded,
-    BothDeleted,
-    AddedByUs,
-    AddedByThem,
-    DeletedByUs,
-    DeletedByThem,
-}
-
-impl From<Conflict> for ConflictKind {
-    fn from(conflict: Conflict) -> Self {
-        match conflict {
-            Conflict::BothModified => Self::BothModified,
-            Conflict::BothAdded => Self::BothAdded,
-            Conflict::BothDeleted => Self::BothDeleted,
-            Conflict::AddedByUs => Self::AddedByUs,
-            Conflict::AddedByThem => Self::AddedByThem,
-            Conflict::DeletedByUs => Self::DeletedByUs,
-            Conflict::DeletedByThem => Self::DeletedByThem,
         }
     }
 }

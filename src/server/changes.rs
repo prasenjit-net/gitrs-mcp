@@ -38,4 +38,33 @@ impl GitServer {
             .await
             .map(Json)
     }
+
+    /// Unresolved conflicts in the index during a merge, rebase, cherry-pick or stash pop: each file's
+    /// conflict kind and its base, ours and theirs versions (blob ids, and text with `include_content`).
+    /// Read the worktree file with `read_file` to see the conflict markers. Paginated (`limit`, default 100).
+    #[tool(annotations(title = "Conflicts", read_only_hint = true))]
+    async fn conflicts(
+        &self,
+        Parameters(args): Parameters<tools::merge::ConflictsArgs>,
+    ) -> Result<Json<tools::merge::ConflictsResult>, String> {
+        self.repo
+            .run(move |r| tools::merge::conflicts(r, args))
+            .await
+            .map(Json)
+    }
+
+    /// Preview merging `theirs` into `ours` (default HEAD) without touching the repository, like
+    /// `git merge-tree --write-tree`: whether it's clean, up to date or a fast-forward, the merge bases,
+    /// the resulting tree, and every file that would conflict with its base/ours/theirs versions. Use it
+    /// to answer "is it safe to merge X into Y?".
+    #[tool(annotations(title = "Merge preview", read_only_hint = true))]
+    async fn merge_preview(
+        &self,
+        Parameters(args): Parameters<tools::merge::MergePreviewArgs>,
+    ) -> Result<Json<tools::merge::MergePreviewResult>, String> {
+        self.repo
+            .run(move |r| tools::merge::merge_preview(r, args))
+            .await
+            .map(Json)
+    }
 }

@@ -43,8 +43,10 @@ requests=(
   "$(call 25 count_objects '{}')"
   "$(call 26 check_ignore '{"paths":["'"$file"'","target/x"]}')"
   "$(call 27 check_attr '{"paths":["'"$file"'"]}')"
+  "$(call 28 conflicts '{}')"
+  "$(call 29 merge_preview '{"theirs":"HEAD"}')"
 )
-last_id=27
+last_id=29
 expect_error='17' # space-separated request ids that must return a tool error
 
 # Keep stdin open briefly so the server can answer before seeing EOF.

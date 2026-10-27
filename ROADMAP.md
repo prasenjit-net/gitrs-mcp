@@ -10,13 +10,13 @@ _Last updated 2026-10-27._
 |---|---|
 | 0 Scaffold | ✅ Done: 4 tools |
 | 1 Core read | ✅ Done: 9 tools, each checked against the git CLI |
-| 2 Deep read and inspection | 🚧 In progress: 12 of 14 tools |
-| 3 Safe writes | Planned |
+| 2 Deep read and inspection | ✅ Done: 14 tools, each checked against the git CLI |
+| 3 Safe writes | ⏭️ Next |
 | 4 History rewriting | Planned |
 | 5 MCP-native extras | Planned |
 | 6 Hardening and release | Planned |
 
-The server has 25 read-only tools. 128 unit tests and the end-to-end smoke test pass, with 95.0% line coverage. `--allow-write` is accepted but registers nothing until Phase 3.
+The server has 27 read-only tools. 136 unit tests and the end-to-end smoke test pass, with 95.1% line coverage. `--allow-write` is accepted but registers nothing until Phase 3.
 
 ## Design principles
 
@@ -43,6 +43,7 @@ src/
    ├─ revision.rs   rev_parse, compare_refs
    ├─ status.rs     status
    ├─ diff.rs       diff (and the tree↔index comparison status reuses)
+   ├─ merge.rs      conflicts, merge_preview
    ├─ files.rs      read_file, list_tree
    ├─ grep.rs       grep
    ├─ attributes.rs check_ignore, check_attr
@@ -163,7 +164,9 @@ All nine tools shipped, each tested against the git CLI (`git status --porcelain
 
 ---
 
-## Phase 2: Deep read and inspection
+## Phase 2: Deep read and inspection ✅ (done)
+
+All 14 tools shipped, each tested against the git CLI (`git describe`, `git tag`, `git log -g`, `git stash list`, `git notes`, `git grep`, `git check-ignore`, `git check-attr`, `git config --list --show-scope`, `git worktree list --porcelain`, `git submodule status`, `git count-objects -v`, `git ls-files -u`, `git merge-tree --write-tree`). Where they differ from the table below, the reasons are in [Phase 2: deviations from the plan](#phase-2-deviations-from-the-plan).
 
 | Tool | In → Out | gix |
 |---|---|---|
@@ -174,11 +177,11 @@ All nine tools shipped, each tested against the git CLI (`git status --porcelain
 | `list_stashes` ✅ | → entries from `refs/stash` reflog | reflog read only; gix has no stash API |
 | `list_worktrees` ✅ | → `{path, branch, head, locked, prunable}` | `repo.worktrees()` |
 | `list_submodules` ✅ | → `{name, path, url, recorded_commit, checked_out_commit, state}` | `repo.submodules()` |
-| `conflicts` | → during a merge/rebase: `path`, ours/theirs/base blob ids and optional contents | index stages 1–3 via `open_index()` |
+| `conflicts` ✅ | → during a merge/rebase: `path`, ours/theirs/base blob ids and optional contents | index stages 1–3 via `open_index()` |
 | `check_ignore` ✅ | `paths[]` → matching rule and source file | `repo.excludes(...)` |
 | `check_attr` ✅ | `paths[]`, `attrs[]` → values | `repo.attributes(...)` |
 | `config_get` ✅ | `key` or `section` → values with scope (local/global/system) | `config_snapshot()`, values redacted: `credential.*`, `*.token`, `*password*`, `http.*.extraheader` |
-| `merge_preview` | `ours`, `theirs` → `clean: bool`, `conflicts[] {path, kind}`, resulting tree id | `merge_commits` in memory only. Nothing is written, so it is read-only and safe |
+| `merge_preview` ✅ | `ours`, `theirs` → `clean: bool`, `conflicts[] {path, kind}`, resulting tree id | `merge_commits` in memory only. Nothing is written, so it is read-only and safe |
 | `notes` ✅ | `rev` → notes text | `repo.notes()` |
 | `count_objects` ✅ | → loose/packed counts and sizes, commit-graph present? | odb stats |
 
@@ -202,6 +205,13 @@ All nine tools shipped, each tested against the git CLI (`git status --porcelain
   - `ignored` follows git's default (tracked files are never ignored), while `pattern` shows the rule even for tracked files, as `--no-index` does.
   - A parent directory's rule decides for everything below it, as in git; gix only matches the path itself, so the tool checks parents first. At most 1000 paths per call.
 - **`check_attr`.** Reports each attribute as `set`, `unset`, `value` or `unspecified`, and `attrs: []` lists everything like `-a`. In that case the order may differ from git's, which lists macros first. At most 1000 paths per call.
+- **`conflicts`.**
+  - Reports each file's `conflict` kind (the `git status` codes) plus `base`, `ours` and `theirs` versions, and the operation `in_progress`.
+  - Text is optional (`include_content`) under one byte budget for the whole response, rather than always included. Paginated.
+- **`merge_preview`.**
+  - The resulting `tree` matches `git merge-tree --write-tree` byte for byte, conflict markers included, also for criss-cross histories (several merge bases).
+  - Conflicts are reported as index stages in the same `ConflictFile` shape as `conflicts`, instead of `{path, kind}`. Added `merge_bases`, `up_to_date`, `fast_forward` and `allow_unrelated`; `ours` defaults to `HEAD`.
+  - gix writes merged blobs, trees and virtual merge bases as the merge runs, so the merge runs against an in-memory object store (`with_object_memory`). A test proves `.git/objects` is unchanged afterwards. Merge drivers and filters from the user's config still run, as with git.
 - **`list_worktrees`.** Besides path, HEAD, branch, locked and prunable, each entry has `id`, `is_main`, `is_bare`, `detached`, `lock_reason` and `is_current` (the worktree being served). Paginated.
 - **`list_submodules`.** `recorded_commit` is the commit the index records, as `git submodule status` uses; `state` mirrors its prefixes (`uninitialized`, `up_to_date`, `different_commit`, `conflicted`). Added `branch`. URLs get the same password redaction as `config_get`.
 - **`config_get`.**
@@ -300,6 +310,9 @@ gix has no sequencer, so this phase is where we build our own logic on its primi
 | Network | n/a | Intentionally excluded |
 | Copy detection drops a modified copy source (found in Phase 1) | With `diff.renames=copies`, a copy whose source was also modified is reported as a copy of the source's *new* content, and the source's own modification disappears | Worked around in `tools/diff.rs` (`repair_copies`): point the copy back at the old content and restore the source's change |
 | `status.renames` read from the wrong section (found in Phase 1) | gix looks the key up as `merge.renames`, so `status.renames` is ignored | Worked around in `tools/diff.rs` (`index_rename_tracking`): resolve `status.renames`, then `diff.renames`, ourselves |
+| Ignore matching only looks at the path itself (found in Phase 2) | `excludes()` → `at_entry()` reports no rule for `target/foo.rs` when `target/` is ignored; git ignores everything below an ignored directory | `tools/attributes.rs` (`deciding_rule`) checks each parent directory first, as git does |
+| Environment variables appear as configuration (found in Phase 2) | The config snapshot contains values gix derives from `GIT_EDITOR`, `HTTPS_PROXY` and others (some under `gitoxide.*` keys), which `git config --list` doesn't show | `config_get` leaves out `Source::EnvOverride` sections |
+| `key =` and a bare `key` look the same when iterating config (found in Phase 2) | The section iterator yields an empty value for both, but git reads the first as the empty string and the second as `true` | `config_get` asks `value_implicit` for empty values |
 | Unified diff output differs from git (found in Phase 1) | gix's unified-diff helpers print `,1` ranges and no function context, and its default line input strips terminators, which loses `\ No newline at end of file` | Own hunk writer in `tools/diff.rs` on top of gix's line diff |
 
 ## Milestone summary
@@ -308,8 +321,8 @@ gix has no sequencer, so this phase is where we build our own logic on its primi
 |---|---|---|---|
 | 0 Scaffold | 4 | — | ✅ done |
 | 1 Core read | 9 | ~4.9k lines including tests (planned ~2–3k) | ✅ done |
-| 2 Deep read | 14 | ~2k LOC | 🚧 12 of 14 |
-| 3 Safe writes | 10 | ~2–3k LOC (index writing and checkout safety are the hard parts) | planned |
+| 2 Deep read | 14 | ~2k LOC | ✅ done |
+| 3 Safe writes | 10 | ~2–3k LOC (index writing and checkout safety are the hard parts) | ⏭️ next |
 | 4 Rewriting | 8 | ~3–4k LOC (sequencer and stash) | planned |
 | 5 MCP extras | resources, prompts, progress, multi-repo | ~1.5k LOC | planned |
 | 6 Hardening | — | ongoing | planned |

@@ -10,7 +10,7 @@ It lets AI assistants inspect a Git repository through typed tools with structur
 - **Structured output.** Every tool returns JSON with a published output schema. Bad input, such as an unknown revision, comes back as a tool error the model can read and correct.
 - **Pure Rust.** It runs as a single static binary that speaks MCP over stdio, and it doesn't need `libgit2` or the `git` executable.
 
-> **Status:** early development. Phases 0 and 1 of the [roadmap](ROADMAP.md) are done, and Phase 2 is under way: 25 read-only tools covering status, diffs, file contents, code search, ignore and attribute rules, history, blame, refs, tags, reflogs, stashes, notes, worktrees, submodules, config and object stats. Write tools come in Phase 3.
+> **Status:** early development. Phases 0–2 of the [roadmap](ROADMAP.md) are done: 27 read-only tools covering status, diffs, merge previews and conflicts, file contents, code search, ignore and attribute rules, history, blame, refs, tags, reflogs, stashes, notes, worktrees, submodules, config and object stats. Write tools come in Phase 3.
 
 ## Install
 
@@ -71,6 +71,8 @@ Revision arguments accept anything `git rev-parse` does: SHAs and SHA prefixes, 
 |---|---|---|
 | `status` | `pathspec?`, `include_untracked?` (default true), `include_ignored?`, `limit?` | Branch, HEAD, configured upstream, and staged, unstaged, untracked, ignored and conflicted paths, with full counts |
 | `diff` | `from?`, `to?`, `staged?`, `pathspec?`, `format?`: `stat` (default), `name_status`, `patch`; `context_lines?`, `max_bytes?`, `limit?`, `skip?` | Changed files with status, line counts and git-compatible patches. Compares worktree↔index (default), index↔revision (`staged`) or two revisions (`from` + `to`) |
+| `conflicts` | `include_content?`, `max_bytes?`, `limit?`, `skip?` | Conflicted files during a merge, rebase or cherry-pick: conflict kind and base/ours/theirs versions |
+| `merge_preview` | `theirs`, `ours?` (default `HEAD`), `allow_unrelated?`, `include_content?`, `max_bytes?`, `limit?`, `skip?` | In-memory merge like `git merge-tree`: clean/up-to-date/fast-forward, merge bases, result tree, files that would conflict |
 | `read_file` | `path`, `rev?` (default `HEAD`; or `index`, `worktree`), `offset_bytes?`, `max_bytes?` | File content as UTF-8 or base64, with size, mode, blob id, and `next_offset` for chunked reads |
 | `list_tree` | `rev?`, `path?`, `recursive?`, `limit?`, `skip?` | Tree entries (path, kind, mode, id, size) in `git ls-tree` order |
 | `blame` | `path`, `rev?`, `line_range?`, `limit?` | Hunks of lines with the commit, author and summary that last changed them, following renames |
@@ -95,7 +97,7 @@ Revision arguments accept anything `git rev-parse` does: SHAs and SHA prefixes, 
 | `config_get` | `key?` or `section?`, `scope?`, `limit?`, `skip?` | Config values with scope and file; credentials, tokens, passwords and auth headers redacted |
 | `count_objects` | none | Loose and packed object counts and sizes, packs, commit-graph and multi-pack-index presence |
 
-The full reference, with every argument, result field, error and a real example per tool, is in [docs/tools.md](docs/tools.md). The rest of Phase 2 adds merge previews and conflict inspection; Phase 3 adds safe write tools behind `--allow-write`. See [ROADMAP.md](ROADMAP.md).
+The full reference, with every argument, result field, error and a real example per tool, is in [docs/tools.md](docs/tools.md). Phase 3 adds safe write tools behind `--allow-write`; see [ROADMAP.md](ROADMAP.md).
 
 ## Documentation
 
@@ -135,6 +137,7 @@ src/
    ├─ revision.rs   rev_parse, compare_refs
    ├─ status.rs     status
    ├─ diff.rs       diff
+   ├─ merge.rs      conflicts, merge_preview
    ├─ files.rs      read_file, list_tree
    ├─ grep.rs       grep
    ├─ attributes.rs check_ignore, check_attr

@@ -7,7 +7,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    byte_budget, index_entry_kind, is_binary, page_limit, repo_file_path, repo_path, resolve_tree,
+    byte_budget, index_entry_kind, is_binary, octal_mode, page_limit, repo_file_path, repo_path,
+    resolve_tree,
 };
 
 const DEFAULT_TREE_LIMIT: usize = 500;
@@ -223,10 +224,6 @@ pub fn worktree_path(workdir: &Path, path: &BStr) -> anyhow::Result<PathBuf> {
         );
     }
     Ok(full)
-}
-
-fn octal_mode(kind: EntryKind) -> String {
-    format!("{:06o}", kind as u16)
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]

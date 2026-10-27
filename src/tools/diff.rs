@@ -22,8 +22,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    ChangeKind, byte_budget, index_entry_kind, page_limit, pathspec_patterns, pathspec_search,
-    resolve_commit, resolve_tree, short_hex,
+    ChangeKind, byte_budget, index_entry_kind, octal_mode, page_limit, pathspec_patterns,
+    pathspec_search, resolve_commit, resolve_tree, short_hex,
 };
 
 const DEFAULT_DIFF_LIMIT: usize = 100;
@@ -938,11 +938,14 @@ fn patch_text(
         quote_path("b/", new_path)
     )?;
     match (old_mode, new_mode) {
-        (None, Some(mode)) => writeln!(out, "new file mode {}", octal(mode))?,
-        (Some(mode), None) => writeln!(out, "deleted file mode {}", octal(mode))?,
-        (Some(a), Some(b)) if a != b => {
-            writeln!(out, "old mode {}\nnew mode {}", octal(a), octal(b))?
-        }
+        (None, Some(mode)) => writeln!(out, "new file mode {}", octal_mode(mode))?,
+        (Some(mode), None) => writeln!(out, "deleted file mode {}", octal_mode(mode))?,
+        (Some(a), Some(b)) if a != b => writeln!(
+            out,
+            "old mode {}\nnew mode {}",
+            octal_mode(a),
+            octal_mode(b)
+        )?,
         _ => {}
     }
     if let Some(source) = change.old_path() {
@@ -963,7 +966,7 @@ fn patch_text(
     if old_id != new_id {
         write!(out, "index {}..{}", short_hex(&old_id), short_hex(&new_id))?;
         match (old_mode, new_mode) {
-            (Some(a), Some(b)) if a == b => writeln!(out, " {}", octal(a))?,
+            (Some(a), Some(b)) if a == b => writeln!(out, " {}", octal_mode(a))?,
             _ => out.push('\n'),
         }
     }
@@ -1058,10 +1061,6 @@ impl ConsumeHunk for HunkWriter<'_> {
     fn finish(self) -> Self::Out {
         self.text
     }
-}
-
-fn octal(kind: EntryKind) -> String {
-    format!("{:06o}", kind as u16)
 }
 
 /// `prefix + path`, C-quoted like git when the path has characters that would break patch parsing.

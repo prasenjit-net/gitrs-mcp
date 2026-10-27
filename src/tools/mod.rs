@@ -11,6 +11,7 @@ pub mod diff;
 pub mod files;
 pub mod grep;
 pub mod history;
+pub mod merge;
 pub mod notes;
 pub mod objects;
 pub mod reflog;
@@ -146,6 +147,58 @@ impl ChangeKind {
         } else {
             Self::Typechange
         }
+    }
+}
+
+/// Which sides of a merge touched a conflicted path, as in `git status`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ConflictKind {
+    /// Both sides changed the path (`UU`): base, ours and theirs all exist.
+    BothModified,
+    /// Both sides added the path with different content (`AA`): no base.
+    BothAdded,
+    /// Both sides deleted or renamed away the path (`DD`): only the base exists.
+    BothDeleted,
+    /// Only our side added the path (`AU`), e.g. while theirs renamed it elsewhere.
+    AddedByUs,
+    /// Only their side added the path (`UA`).
+    AddedByThem,
+    /// We deleted the path and they modified it (`DU`).
+    DeletedByUs,
+    /// They deleted the path and we modified it (`UD`).
+    DeletedByThem,
+}
+
+impl From<gix::status::plumbing::index_as_worktree::Conflict> for ConflictKind {
+    fn from(conflict: gix::status::plumbing::index_as_worktree::Conflict) -> Self {
+        use gix::status::plumbing::index_as_worktree::Conflict;
+        match conflict {
+            Conflict::BothModified => Self::BothModified,
+            Conflict::BothAdded => Self::BothAdded,
+            Conflict::BothDeleted => Self::BothDeleted,
+            Conflict::AddedByUs => Self::AddedByUs,
+            Conflict::AddedByThem => Self::AddedByThem,
+            Conflict::DeletedByUs => Self::DeletedByUs,
+            Conflict::DeletedByThem => Self::DeletedByThem,
+        }
+    }
+}
+
+impl ConflictKind {
+    /// The kind from which index stages exist for a path: base (1), ours (2) and theirs (3).
+    /// `None` when no stage exists, so the path isn't conflicted.
+    pub fn from_stages(base: bool, ours: bool, theirs: bool) -> Option<Self> {
+        Some(match (base, ours, theirs) {
+            (true, true, true) => Self::BothModified,
+            (false, true, true) => Self::BothAdded,
+            (true, false, false) => Self::BothDeleted,
+            (false, true, false) => Self::AddedByUs,
+            (false, false, true) => Self::AddedByThem,
+            (true, false, true) => Self::DeletedByUs,
+            (true, true, false) => Self::DeletedByThem,
+            (false, false, false) => return None,
+        })
     }
 }
 
@@ -324,6 +377,16 @@ pub fn clip_utf8(text: &str, max_bytes: usize) -> (&str, bool) {
         end -= 1;
     }
     (&text[..end], true)
+}
+
+/// A tree entry kind as git prints its mode: `100644`, `100755`, `120000`, `040000` or `160000`.
+pub fn octal_mode(kind: gix::object::tree::EntryKind) -> String {
+    format!("{:06o}", kind as u16)
+}
+
+/// The operation in progress (`Merge`, `Rebase`, `CherryPick`, ...), if any.
+pub fn in_progress(repo: &gix::Repository) -> Option<String> {
+    repo.state().map(|state| format!("{state:?}"))
 }
 
 /// Format an object id abbreviated to git's default seven hex digits.

@@ -58,7 +58,8 @@ impl ServerHandler for GitServer {
                  Revisions accept anything `git rev-parse` would (SHA prefixes, branches, tags, HEAD~n). \
                  Paths and pathspecs are relative to the repository root. Lists are paginated and report \
                  `truncated`; large content stays within a byte budget. Start with `status` to see local \
-                 changes, `grep` to find code, `log` or `search_commits` for history, and `blame` or `file_history` for where code came from.",
+                 changes, `grep` to find code, `log` or `search_commits` for history, `blame` or `file_history` for where code came from, \
+                 and `merge_preview` before merging.",
             )
     }
 }

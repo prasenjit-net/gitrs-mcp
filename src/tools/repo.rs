@@ -1,6 +1,8 @@
 use schemars::JsonSchema;
 use serde::Serialize;
 
+use super::in_progress;
+
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct RepoInfo {
     /// Absolute path of the `.git` directory (the repository itself when bare).
@@ -27,7 +29,7 @@ pub fn repo_info(repo: &gix::Repository) -> anyhow::Result<RepoInfo> {
         is_shallow: repo.is_shallow()?,
         head_branch: repo.head_name()?.map(|n| n.shorten().to_string()),
         head_commit: repo.head_id().ok().map(|id| id.to_string()),
-        in_progress: repo.state().map(|s| format!("{s:?}")),
+        in_progress: in_progress(repo),
     })
 }
 

@@ -9,7 +9,7 @@ src/
 ├─ main.rs          CLI arguments, logging to stderr, stdio transport
 ├─ server/          MCP surface: server metadata (mod.rs) and one #[tool_router] per area
 │  ├─ repo.rs       repository, refs, tags, reflogs and revisions
-│  ├─ changes.rs    working tree and index
+│  ├─ changes.rs    working tree, index, conflicts and merge previews
 │  ├─ files.rs      file contents, search, ignore and attribute rules, blame
 │  ├─ history.rs    commit history and notes
 │  └─ setup.rs      worktrees, submodules, config and object storage
@@ -23,6 +23,7 @@ src/
    ├─ revision.rs   rev_parse, compare_refs
    ├─ status.rs     status
    ├─ diff.rs       diff, plus the tree/index comparison that status reuses
+   ├─ merge.rs      conflicts, merge_preview (an in-memory merge)
    ├─ files.rs      read_file, list_tree
    ├─ grep.rs       grep
    ├─ attributes.rs check_ignore, check_attr
@@ -90,7 +91,7 @@ Results are meant to match the `git` CLI on the same repository, and the tests c
 ## Safety model
 
 - **Local only, by construction.** gix is compiled without any network transport feature, so fetch, push, clone and `ls-remote` can't be reached from any code path. `status.upstream` reports the configured upstream from local config only; nothing is ever fetched.
-- **Read-only.** Every current tool is read-only and annotated with `readOnlyHint`. The `--allow-write` flag is reserved for the write tools planned in Phase 3 of the [roadmap](../ROADMAP.md). Those tools will only be registered when the flag is given, so without it the model never sees them.
+- **Read-only.** Every current tool is read-only and annotated with `readOnlyHint`. `merge_preview` computes a full merge, but the blobs and trees it creates go to an in-memory object store that is dropped afterwards; a test checks that `.git/objects` is unchanged after a preview. As with `git merge-tree`, merge drivers and filters from the user's git configuration can run during the merge. The `--allow-write` flag is reserved for the write tools planned in Phase 3 of the [roadmap](../ROADMAP.md). Those tools will only be registered when the flag is given, so without it the model never sees them.
 - **Filesystem reads stay inside the repository.** Reads from the working tree (`read_file` with `rev: "worktree"`, and `grep`, which skips such paths) refuse anything under `.git/` and any path whose parent directory resolves outside the repository through a symlink. A symlink itself is reported by its target, as git stores it, and never followed.
 - **Secrets stay out of output.** `config_get` and `list_submodules` replace values that may be secrets with `<redacted>`: anything under `credential`, keys named like a password, token or secret, `http.extraHeader`, and the password in any URL. Configuration that gix derives from environment variables isn't listed at all, as in `git config --list`.
 - **Bounded output.** Every list is paginated and every content field has a byte budget, so a single call can't flood the client's context.

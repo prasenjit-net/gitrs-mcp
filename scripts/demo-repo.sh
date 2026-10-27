@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build the demo workspace the examples in docs/tools.md come from, under <dir>:
 #   <dir>/demo         the demo repository (serve this one)
-#   <dir>/demo-review  a linked worktree of demo, on `feature`, locked
+#   <dir>/demo-review  a linked worktree of demo, on `feature`, locked, in the middle of merging `polish`
 #   <dir>/assets       a small repository that demo uses as the submodule `vendor/assets`
 # Identities and dates are fixed, so every run produces the same SHAs.
 # Usage: scripts/demo-repo.sh <dir>
@@ -36,6 +36,9 @@ at 1790937600 && git tag -a v0.1.0 -m "First release" -m "greet and shout."
 git checkout -q -b feature
 printf 'pub fn farewell(name: &str) -> String {\n    format!("Goodbye, {name}.")\n}\n' > src/farewell.rs
 git add . && at 1791036000 && git commit -q -m "Add farewell"
+git checkout -q -b polish v0.1.0
+printf 'pub fn farewell(name: &str) -> String {\n    format!("See you, {name}!")\n}\n' > src/farewell.rs
+git add . && at 1791050000 && git commit -q -m "Add a friendlier farewell"
 git checkout -q main
 printf '\n## Usage\n\n```rust\nlet hi = greet::greet("Ada");\n```\n' >> README.md
 git add . && at 1791101700 && git commit -q -m "Document usage" -m "Fixes #12"
@@ -46,6 +49,8 @@ at 1791105000 && git stash push -q -m "try a new intro"
 git remote add origin https://ada:hunter2@example.com/greet.git
 git worktree add -q ../demo-review feature
 git worktree lock --reason "reviewing feature" ../demo-review
+# Both branches add src/farewell.rs, so this merge stops with a conflict for `conflicts` to show.
+at 1791106000 && git -C ../demo-review merge -q polish > /dev/null || true
 # Working tree: unstaged edit, staged new file, untracked file.
 sed 's/Hello, {name}!/Hello, {name}!!/' src/lib.rs > src/lib.rs.new && mv src/lib.rs.new src/lib.rs
 printf 'fn main() {\n    println!("{}", greet::greet("world"));\n}\n' > src/main.rs

@@ -216,11 +216,15 @@ pub fn plan_restore(
         let target = source.get(&path).copied();
         let in_index = staged.get(&path).copied();
         let on_disk = disk.get(&path).copied().unwrap_or(OnDisk::Missing);
-        let worktree = request
-            .worktree
+        // A submodule's checkout is its own repository: like git, only its gitlink in the index changes.
+        let gitlink = [target, in_index]
+            .iter()
+            .flatten()
+            .any(|(_, mode)| *mode == Mode::COMMIT);
+        let worktree = (request.worktree && !gitlink)
             .then(|| change(on_disk.version(), target))
             .flatten();
-        if request.worktree && on_disk == OnDisk::Directory && target.is_some() {
+        if request.worktree && !gitlink && on_disk == OnDisk::Directory && target.is_some() {
             bail!(
                 "`{path}` is a directory in the working tree; move it away before restoring the file"
             );
@@ -378,7 +382,8 @@ pub fn switch(repo: &gix::Repository, args: SwitchArgs) -> anyhow::Result<Switch
     let new_tree = repo.find_commit(to.commit)?.tree_id()?.detach();
     let changes = tree_changes(repo, old_tree, new_tree)?;
     let mut updated = update_index(repo, |index| {
-        let plan = plan_switch(repo, index, &workdir, &changes, &args.target)?;
+        let action = format!("switching to `{}`", args.target);
+        let plan = plan_switch(repo, index, &workdir, &changes, &action)?;
         apply_switch(repo, index, &workdir, plan)
     })?;
 
@@ -503,10 +508,10 @@ impl Destination {
 }
 
 /// Paths whose version differs between two trees: `(old, new)`, `None` where a tree lacks the path.
-type TreeChanges = BTreeMap<BString, (Option<Version>, Option<Version>)>;
+pub type TreeChanges = BTreeMap<BString, (Option<Version>, Option<Version>)>;
 
 /// The [`TreeChanges`] from `old` to `new`.
-fn tree_changes(
+pub fn tree_changes(
     repo: &gix::Repository,
     old: ObjectId,
     new: ObjectId,
@@ -524,20 +529,20 @@ fn tree_changes(
 }
 
 /// A path the switch rewrites: its version before and after.
-struct Step {
-    path: BString,
-    old: Option<Version>,
-    new: Option<Version>,
+pub struct Step {
+    pub path: BString,
+    pub old: Option<Version>,
+    pub new: Option<Version>,
 }
 
 /// Check every changed path against local changes, git's two-way rule: a path the switch rewrites
 /// must be clean in the index and working tree, and nothing untracked may be in the way.
-fn plan_switch(
+pub fn plan_switch(
     repo: &gix::Repository,
     index: &gix::index::State,
     workdir: &Path,
     changes: &TreeChanges,
-    target: &str,
+    action: &str,
 ) -> anyhow::Result<Vec<Step>> {
     let staged = staged_versions(index);
     let paths: BTreeSet<BString> = changes.keys().cloned().collect();
@@ -612,15 +617,14 @@ fn plan_switch(
     }
     if !blocked.is_empty() {
         bail!(
-            "switching to `{target}` would overwrite local changes; commit, stash or restore them \
-             first: {}",
+            "{action} would overwrite local changes; commit, stash or restore them first: {}",
             name_some(&blocked, "", "")
         );
     }
     Ok(steps)
 }
 
-fn apply_switch(
+pub fn apply_switch(
     repo: &gix::Repository,
     index: &mut gix::index::State,
     workdir: &Path,
@@ -718,7 +722,7 @@ fn disk_states(
 
 /// Write `files` into the working tree as `git checkout` does (smudge filters, line endings,
 /// symlinks, executable bit), returning each file's new stat for the index.
-fn write_to_worktree(
+pub fn write_to_worktree(
     repo: &gix::Repository,
     workdir: &Path,
     files: &[(BString, Version)],
@@ -774,7 +778,7 @@ fn write_to_worktree(
 }
 
 /// Delete a file (or an empty submodule directory) and any directories that become empty, as git does.
-fn remove_from_worktree(workdir: &Path, path: &BStr) -> anyhow::Result<()> {
+pub fn remove_from_worktree(workdir: &Path, path: &BStr) -> anyhow::Result<()> {
     let full = workdir.join(gix::path::from_bstr(path)?);
     match std::fs::symlink_metadata(&full) {
         Ok(meta) if meta.is_dir() => {
@@ -868,7 +872,7 @@ fn only_deleted_files_below(
 }
 
 /// Stage-0 entries of the index, by path.
-fn staged_versions(index: &gix::index::State) -> BTreeMap<BString, Version> {
+pub fn staged_versions(index: &gix::index::State) -> BTreeMap<BString, Version> {
     index
         .entries()
         .iter()
@@ -1483,6 +1487,40 @@ mod tests {
                 .to_string()
                 .contains("bare")
         );
+    }
+
+    #[test]
+    fn restoring_everything_leaves_submodule_checkouts_alone() {
+        let (sub, _) = fixture_repo();
+        let url = sub.path().to_str().unwrap().to_owned();
+        let with_submodule = move |root: &Path| {
+            run_git(
+                root,
+                &[
+                    "-c",
+                    "protocol.file.allow=always",
+                    "submodule",
+                    "add",
+                    "-q",
+                    &url,
+                    "sub",
+                ],
+            );
+            run_git(root, &["commit", "-q", "-m", "add submodule"]);
+            write(root, "a.txt", "edited\n");
+        };
+        let [(ours, repo), (theirs, _)] = twins(with_submodule);
+        restore(
+            &repo,
+            restore_args(&["."], Some("HEAD"), true, Some(true), false),
+        )
+        .unwrap();
+        run_git(
+            theirs.path(),
+            &["restore", "--staged", "--worktree", "--source=HEAD", "."],
+        );
+        assert_eq!(worktree_files(ours.path()), worktree_files(theirs.path()));
+        assert_eq!(ls_files(ours.path()), ls_files(theirs.path()));
     }
 
     #[test]

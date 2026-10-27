@@ -10,7 +10,7 @@ It lets AI assistants inspect a Git repository through typed tools with structur
 - **Structured output.** Every tool returns JSON with a published output schema. Bad input, such as an unknown revision, comes back as a tool error the model can read and correct.
 - **Pure Rust.** It runs as a single static binary that speaks MCP over stdio, and it doesn't need `libgit2` or the `git` executable.
 
-> **Status:** early development. Phases 0–3 of the [roadmap](ROADMAP.md) are done: 27 read-only tools covering status, diffs, merge previews and conflicts, file contents, code search, ignore and attribute rules, history, blame, refs, tags, reflogs, stashes, notes, worktrees, submodules, config and object stats; and, with `--allow-write`, safe write tools for the local edit, stage, commit and branch loop. Phase 4 (history rewriting) is under way: hard resets and `clean` are in, with stash, merge, cherry-pick, revert, rebase and worktrees to follow.
+> **Status:** early development. Phases 0–3 of the [roadmap](ROADMAP.md) are done: 27 read-only tools covering status, diffs, merge previews and conflicts, file contents, code search, ignore and attribute rules, history, blame, refs, tags, reflogs, stashes, notes, worktrees, submodules, config and object stats; and, with `--allow-write`, safe write tools for the local edit, stage, commit and branch loop. Phase 4 (history rewriting) is under way: hard resets, `clean` and stashes are in, with merge, cherry-pick, revert, rebase and worktrees to follow.
 
 ## Install
 
@@ -112,6 +112,9 @@ With `--allow-write`, these write tools are added:
 | `restore` | `paths`, `source?`, `staged?`, `worktree?`, `dry_run?` (default **true**) | Restores files from the index or a revision like `git restore`; flags content that would be lost |
 | `switch` | `target`, `create?`, `start_point?`, `detach?` | Switches branch like `git switch`, carrying local changes over and refusing to overwrite any |
 | `clean` | `paths?`, `directories?`, `ignored?` (`keep`, `also`, `only`), `dry_run?` (default **true**) | Deletes untracked (and optionally ignored) files like `git clean -f`; never nested repositories |
+| `stash_push` | `message?`, `include_untracked?` | Stashes local changes in git's stash format and resets to HEAD |
+| `stash_pop` | `index?`, `restore_index?`, `drop?` (default true) | Applies a stash like `git stash pop`; refuses instead of conflicting |
+| `stash_drop` | `index?`, `dry_run?` (default **true**) | Drops a stash like `git stash drop` |
 
 The full reference, with every argument, result field, error and a real example per tool, is in [docs/tools.md](docs/tools.md). Phase 4 adds merges, rebases, cherry-picks and stashes; see [ROADMAP.md](ROADMAP.md).
 
@@ -165,6 +168,7 @@ src/
    ├─ commit.rs     commit, reset
    ├─ checkout.rs   restore, switch
    ├─ clean.rs      clean
+   ├─ stash.rs      stash_push, stash_pop, stash_drop
    ├─ submodules.rs list_submodules
    ├─ config.rs     config_get (with secret redaction)
    ├─ objects.rs    count_objects

@@ -161,7 +161,7 @@ pub fn commit(repo: &gix::Repository, args: CommitArgs) -> anyhow::Result<Commit
 
 /// The tree the index describes, written to the object database. Intent-to-add entries are left
 /// out, as `git commit` does.
-fn write_tree(repo: &gix::Repository, index: &gix::index::State) -> anyhow::Result<ObjectId> {
+pub fn write_tree(repo: &gix::Repository, index: &gix::index::State) -> anyhow::Result<ObjectId> {
     let mut editor = repo.edit_tree(ObjectId::empty_tree(repo.object_hash()))?;
     for entry in index.entries() {
         if entry.flags.contains(Flags::INTENT_TO_ADD) {

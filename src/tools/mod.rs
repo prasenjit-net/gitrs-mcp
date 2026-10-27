@@ -23,6 +23,7 @@ pub mod refs;
 pub mod repo;
 pub mod revision;
 pub mod staging;
+pub mod stash;
 pub mod status;
 pub mod submodules;
 pub mod worktrees;

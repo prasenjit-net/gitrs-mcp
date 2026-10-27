@@ -1,6 +1,6 @@
 # Tool reference
 
-gitrs-mcp exposes 27 read-only tools, plus 11 write tools that are only available when the server runs with `--allow-write`. This page covers each one: what it does, its arguments and defaults, the fields it returns, the errors it reports, and a real request and response.
+gitrs-mcp exposes 27 read-only tools, plus 14 write tools that are only available when the server runs with `--allow-write`. This page covers each one: what it does, its arguments and defaults, the fields it returns, the errors it reports, and a real request and response.
 
 - [Conventions](#conventions)
 - [Shared types](#shared-types)
@@ -9,7 +9,7 @@ gitrs-mcp exposes 27 read-only tools, plus 11 write tools that are only availabl
 - Files: [`read_file`](#read_file), [`list_tree`](#list_tree), [`blame`](#blame), [`grep`](#grep), [`check_ignore`](#check_ignore), [`check_attr`](#check_attr)
 - History: [`log`](#log), [`show_commit`](#show_commit), [`file_history`](#file_history), [`search_commits`](#search_commits), [`notes`](#notes)
 - Repository setup: [`list_worktrees`](#list_worktrees), [`list_submodules`](#list_submodules), [`config_get`](#config_get), [`count_objects`](#count_objects)
-- [Write tools](#write-tools) (only with `--allow-write`): [`create_branch`](#create_branch), [`delete_branch`](#delete_branch), [`rename_branch`](#rename_branch), [`create_tag`](#create_tag), [`stage`](#stage), [`unstage`](#unstage), [`commit`](#commit), [`reset`](#reset), [`restore`](#restore), [`switch`](#switch), [`clean`](#clean)
+- [Write tools](#write-tools) (only with `--allow-write`): [`create_branch`](#create_branch), [`delete_branch`](#delete_branch), [`rename_branch`](#rename_branch), [`create_tag`](#create_tag), [`stage`](#stage), [`unstage`](#unstage), [`commit`](#commit), [`reset`](#reset), [`restore`](#restore), [`switch`](#switch), [`clean`](#clean), [`stash_push`](#stash_push), [`stash_pop`](#stash_pop), [`stash_drop`](#stash_drop)
 
 ## Conventions
 
@@ -422,7 +422,7 @@ The stash list, newest first, like `git stash list`. git keeps stashes as the re
 | `stashes[].committer` | Signature | Who made the stash, and when. |
 | `truncated` | boolean | True if older stashes exist past this page. |
 
-To see what a stash holds, call `diff` with `from` set to its `base` and `to` set to its `selector`.
+To see what a stash holds, call `diff` with `from` set to its `base` and `to` set to its `selector`. With `--allow-write`, [`stash_push`](#stash_push), [`stash_pop`](#stash_pop) and [`stash_drop`](#stash_drop) create, apply and drop stashes.
 
 **Example**
 
@@ -1613,7 +1613,7 @@ These tools change the repository. They are only registered when the server is s
 
 - **Check first, then write.** Every check runs before anything is written, so a refused call leaves the repository byte for byte as it was. The tests prove this for each tool.
 - **No surprises with in-progress operations.** Tools that move HEAD, rewrite the index or touch the working tree refuse while a merge, rebase, cherry-pick, revert or bisect is in progress. Creating branches and tags is still allowed then, as in git.
-- **Destructive tools default to a dry run.** A tool that can lose data (`delete_branch`, `restore`, `reset` with `mode: hard`, `clean`) takes `dry_run` (default `true`) and runs every check without changing anything. Pass `dry_run: false` to act.
+- **Destructive tools default to a dry run.** A tool that can lose data (`delete_branch`, `restore`, `reset` with `mode: hard`, `clean`, `stash_drop`) takes `dry_run` (default `true`) and runs every check without changing anything. Pass `dry_run: false` to act.
 - **Ref updates are compare-and-swap.** Each ref is updated only if it still points where the tool saw it, under git's lock files, so a concurrent `git` command can't be overwritten silently. Reflog entries use the same messages git writes.
 - **An identity is required.** Commits, tags and reflog entries record a committer from `user.name` and `user.email` in the git config (or the `GIT_COMMITTER_*` environment variables). Without one, the call is refused with instructions.
 - **The index is written like git writes it.** Index edits take `.git/index.lock` before reading the index, so a concurrent `git add` can't be lost, and write it back without the cache-tree, untracked-cache and fsmonitor extensions, which git rebuilds. A split index is written back as a regular one, with every entry; repositories using a sparse index are refused.
@@ -1961,8 +1961,22 @@ A hard reset, as a dry run:
 {"rev": "HEAD~1", "mode": "hard"}
 ```
 
-```
-`vendor/assets` is a directory in the working tree; move it away before restoring the file
+```json
+{
+  "branch": "main",
+  "discards_changes": true,
+  "dry_run": true,
+  "files": [
+    {"discards_changes": false, "index": "modified", "path": "README.md", "worktree": "modified"},
+    {"discards_changes": true, "index": null, "path": "src/lib.rs", "worktree": "modified"},
+    {"discards_changes": true, "index": "deleted", "path": "src/main.rs", "worktree": "deleted"}
+  ],
+  "files_count": 3,
+  "head": "41dad034dd469fe144a58a71bcd86453cd70ade1",
+  "mode": "hard",
+  "previous": "48ce6b19c89fc67695e4e723b8192fb167fb8f00",
+  "staged_total": 1
+}
 ```
 
 ## `restore`
@@ -2106,4 +2120,129 @@ It's a **dry run by default**: the result lists what would be deleted. Pass `dry
 
 ```json
 {"count": 1, "dry_run": true, "removed": [{"directory": false, "ignored": false, "path": "notes.txt"}]}
+```
+
+## `stash_push`
+
+Save local changes as a new stash and reset the working tree and index to HEAD, like `git stash push`. Staged and unstaged changes to tracked files are saved, and with `include_untracked: true`, untracked files too (`-u`), which are then deleted; ignored files are never stashed. Stashes use git's own layout (a commit of the working tree with the index and untracked files as extra parents, and git's messages), so `git stash pop` and `git stash list` work on them, and `stash_pop` works on stashes git made.
+
+**Arguments**
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `message` | string | `WIP on <branch>: <commit>` | Description of the stash. |
+| `include_untracked` | boolean | `false` | Also stash untracked files. |
+
+**Result:** the new stash as [`list_stashes`](#list_stashes) describes it (`stash@{0}`).
+
+**Errors:** no local changes to save; no commits yet; unresolved conflicts; an operation in progress; no committer identity; a bare repository.
+
+**Example**
+
+```json
+{"message": "entry point, half done", "include_untracked": true}
+```
+
+```json
+{
+  "base": "48ce6b19c89fc67695e4e723b8192fb167fb8f00",
+  "branch": "main",
+  "committer": {"email": "ada@example.com", "name": "Ada Lovelace", "offset": 0, "time": 1791200000},
+  "id": "124c39b38d3dc6f74cc237dabc4f00cd1dd8f2e6",
+  "includes_untracked": true,
+  "index": 0,
+  "message": "On main: entry point, half done",
+  "selector": "stash@{0}"
+}
+```
+
+## `stash_pop`
+
+Apply a stash to the working tree and drop it, like `git stash pop`; with `drop: false` the stash is kept (`git stash apply`). The stash's changes are merged onto the current HEAD, so it can be applied after HEAD moved. By default the changes come back unstaged, except new files, which are staged, as git does; `restore_index: true` restores what was staged as staged (`--index`). Untracked files saved with the stash are restored.
+
+It never leaves a half-applied stash: if applying would conflict, would touch a file with local changes, or an untracked file is in the way, it refuses before writing anything and names the problem. Local changes to files the stash doesn't touch are kept.
+
+**Arguments**
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `index` | integer | `0` | Which stash: 0 is the newest, `stash@{0}`. |
+| `restore_index` | boolean | `false` | Restore staged changes as staged. |
+| `drop` | boolean | `true` | Drop the stash after applying it. |
+
+**Result**
+
+| Field | Type | Description |
+|---|---|---|
+| `stash` | object | The stash that was applied, as [`list_stashes`](#list_stashes) showed it. |
+| `updated[]` | array | Tracked files the stash changed, each with a `path` and a ChangeKind `change`; at most 500. |
+| `restored_untracked` | integer | Untracked files restored from the stash. |
+| `dropped` | boolean | True when the stash was dropped. |
+
+**Errors:** no such stash; conflicts with HEAD; local changes or an untracked file in the way; an operation in progress; a bare repository; the index is locked.
+
+**Example**
+
+```json
+{}
+```
+
+```json
+{
+  "dropped": true,
+  "restored_untracked": 0,
+  "stash": {
+    "base": "48ce6b19c89fc67695e4e723b8192fb167fb8f00",
+    "branch": "main",
+    "committer": {"email": "ada@example.com", "name": "Ada Lovelace", "offset": 0, "time": 1791105000},
+    "id": "dbcd799721ed9636188e6497d1bad21738471383",
+    "includes_untracked": false,
+    "index": 0,
+    "message": "On main: try a new intro",
+    "selector": "stash@{0}"
+  },
+  "updated": [{"change": "modified", "path": "README.md"}]
+}
+```
+
+## `stash_drop`
+
+Remove a stash from the stash list, like `git stash drop`. Dry run by default. The dropped stash's `id` can bring it back with `git stash store -m "<message>" <id>` until git garbage-collects it.
+
+**Arguments**
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `index` | integer | `0` | Which stash: 0 is the newest, `stash@{0}`. |
+| `dry_run` | boolean | `true` | Only report which stash would be dropped. |
+
+**Result**
+
+| Field | Type | Description |
+|---|---|---|
+| `stash` | object | The stash that is (or would be) dropped, as [`list_stashes`](#list_stashes) describes it. |
+| `dry_run` | boolean | Whether this was a dry run. |
+
+**Errors:** no such stash; no committer identity.
+
+**Example**
+
+```json
+{}
+```
+
+```json
+{
+  "dry_run": true,
+  "stash": {
+    "base": "48ce6b19c89fc67695e4e723b8192fb167fb8f00",
+    "branch": "main",
+    "committer": {"email": "ada@example.com", "name": "Ada Lovelace", "offset": 0, "time": 1791105000},
+    "id": "dbcd799721ed9636188e6497d1bad21738471383",
+    "includes_untracked": false,
+    "index": 0,
+    "message": "On main: try a new intro",
+    "selector": "stash@{0}"
+  }
+}
 ```

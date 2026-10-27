@@ -36,6 +36,7 @@ src/
    ├─ commit.rs     commit, reset
    ├─ checkout.rs   restore, switch: working-tree writes
    ├─ clean.rs      clean
+   ├─ stash.rs      stash_push, stash_pop, stash_drop (git's stash layout, built on gix primitives)
    ├─ submodules.rs list_submodules
    ├─ config.rs     config_get, plus the secret redaction submodule URLs share
    ├─ objects.rs    count_objects

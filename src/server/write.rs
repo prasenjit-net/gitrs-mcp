@@ -219,6 +219,61 @@ impl GitServer {
             .await
             .map(Json)
     }
+
+    /// Save local changes (staged and unstaged, plus untracked files with `include_untracked`) as a
+    /// new stash and reset to HEAD, like `git stash push`. Stashes use git's layout, so git can pop them.
+    #[tool(annotations(
+        title = "Stash push",
+        read_only_hint = false,
+        destructive_hint = false,
+        idempotent_hint = false
+    ))]
+    async fn stash_push(
+        &self,
+        Parameters(args): Parameters<tools::stash::StashPushArgs>,
+    ) -> Result<Json<tools::reflog::StashEntry>, String> {
+        self.repo
+            .run(move |r| tools::stash::stash_push(r, args))
+            .await
+            .map(Json)
+    }
+
+    /// Apply a stash (default the newest) to the working tree and drop it, like `git stash pop`;
+    /// `drop: false` keeps it (`git stash apply`), `restore_index: true` restores staged changes as
+    /// staged. Refuses instead of conflicting or overwriting local changes, naming the files.
+    #[tool(annotations(
+        title = "Stash pop",
+        read_only_hint = false,
+        destructive_hint = false,
+        idempotent_hint = false
+    ))]
+    async fn stash_pop(
+        &self,
+        Parameters(args): Parameters<tools::stash::StashPopArgs>,
+    ) -> Result<Json<tools::stash::StashPopResult>, String> {
+        self.repo
+            .run(move |r| tools::stash::stash_pop(r, args))
+            .await
+            .map(Json)
+    }
+
+    /// Remove a stash (default the newest) from the stash list, like `git stash drop`. Dry run by
+    /// default: check `stash`, then set `dry_run: false`. Its `id` can bring it back with `git stash store`.
+    #[tool(annotations(
+        title = "Stash drop",
+        read_only_hint = false,
+        destructive_hint = true,
+        idempotent_hint = false
+    ))]
+    async fn stash_drop(
+        &self,
+        Parameters(args): Parameters<tools::stash::StashDropArgs>,
+    ) -> Result<Json<tools::stash::StashDropResult>, String> {
+        self.repo
+            .run(move |r| tools::stash::stash_drop(r, args))
+            .await
+            .map(Json)
+    }
 }
 
 #[cfg(test)]
@@ -341,5 +396,32 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(switched.0.branch.as_deref(), Some("feature"));
+
+        crate::tools::testutil::write(dir.path(), "a.txt", "to stash\n");
+        let stashed = server
+            .stash_push(Parameters(tools::stash::StashPushArgs {
+                message: None,
+                include_untracked: false,
+            }))
+            .await
+            .unwrap();
+        assert_eq!(stashed.0.selector, "stash@{0}");
+        let dropped = server
+            .stash_drop(Parameters(tools::stash::StashDropArgs {
+                index: 0,
+                dry_run: true,
+            }))
+            .await
+            .unwrap();
+        assert!(dropped.0.dry_run);
+        let popped = server
+            .stash_pop(Parameters(tools::stash::StashPopArgs {
+                index: 0,
+                restore_index: false,
+                drop: true,
+            }))
+            .await
+            .unwrap();
+        assert!(popped.0.dropped);
     }
 }

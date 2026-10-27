@@ -89,7 +89,7 @@ mod tests {
     use super::*;
     use crate::tools::testutil::fixture_repo;
 
-    const WRITE_TOOLS: [&str; 11] = [
+    const WRITE_TOOLS: [&str; 14] = [
         "create_branch",
         "delete_branch",
         "rename_branch",
@@ -101,6 +101,9 @@ mod tests {
         "restore",
         "switch",
         "clean",
+        "stash_push",
+        "stash_pop",
+        "stash_drop",
     ];
 
     fn server(path: &std::path::Path, allow_write: bool) -> GitServer {
@@ -140,7 +143,7 @@ mod tests {
                 destructive,
                 Some(matches!(
                     name,
-                    "delete_branch" | "restore" | "reset" | "clean"
+                    "delete_branch" | "restore" | "reset" | "clean" | "stash_drop"
                 )),
                 "{name}"
             );

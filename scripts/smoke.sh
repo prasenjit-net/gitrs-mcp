@@ -2,6 +2,8 @@
 # End-to-end MCP check over stdio: initialize, list tools, call every tool once.
 # Usage: scripts/smoke.sh <path-to-gitrs-mcp-binary> <repo> [file]
 # `file` is a tracked file for read_file, blame and file_history (default README.md).
+# Calls whose result depends on what the repo contains (a tag to show, ...) ask for something that
+# can't exist and must come back as a tool error, so the check works on any repository.
 set -euo pipefail
 
 bin=${1:?binary path required}
@@ -29,24 +31,34 @@ requests=(
   "$(call 13 search_commits '{"limit":3}')"
   "$(call 14 compare_refs '{"base":"HEAD","head":"HEAD"}')"
   "$(call 15 blame '{"path":"'"$file"'","line_range":[1,1]}')"
+  "$(call 16 describe '{}')"
+  "$(call 17 show_tag '{"name":"gitrs-smoke-no-such-tag"}')"
+  "$(call 18 reflog '{"limit":3}')"
+  "$(call 19 list_stashes '{"limit":3}')"
+  "$(call 20 notes '{}')"
 )
+last_id=20
+expect_error='17' # space-separated request ids that must return a tool error
 
 # Keep stdin open briefly so the server can answer before seeing EOF.
 { printf '%s\n' "${requests[@]}"; sleep 1; } \
   | "$bin" --repo "$repo" \
   | python3 -c '
 import json, sys
+last_id, want_error = int(sys.argv[1]), {int(i) for i in sys.argv[2].split()}
 failed = False
-expected = set(range(1, 16))
+expected = set(range(1, last_id + 1))
 for line in sys.stdin:
     msg = json.loads(line)
-    expected.discard(msg.get("id"))
+    msg_id = msg.get("id")
+    expected.discard(msg_id)
     res = msg.get("result") or {}
-    if "error" in msg or res.get("isError"):
+    if "error" in msg or bool(res.get("isError")) != (msg_id in want_error):
+        print(f"unexpected outcome for request id {msg_id}", file=sys.stderr)
         failed = True
     print(json.dumps(msg, indent=2))
 if expected:
     print(f"no response for request ids {sorted(expected)}", file=sys.stderr)
     failed = True
 sys.exit(1 if failed else 0)
-'
+' "$last_id" "$expect_error"

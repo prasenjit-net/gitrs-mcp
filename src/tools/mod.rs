@@ -8,6 +8,8 @@ pub mod blame;
 pub mod diff;
 pub mod files;
 pub mod history;
+pub mod notes;
+pub mod reflog;
 pub mod refs;
 pub mod repo;
 pub mod revision;
@@ -45,6 +47,37 @@ impl Signature {
             time: time.seconds,
             offset: time.offset,
         })
+    }
+
+    /// From an already parsed signature, such as one in a reflog line.
+    pub fn from_owned(sig: &gix::actor::Signature) -> Self {
+        Self {
+            name: sig.name.to_string(),
+            email: sig.email.to_string(),
+            time: sig.time.seconds,
+            offset: sig.time.offset,
+        }
+    }
+}
+
+/// A git object type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum ObjectType {
+    Commit,
+    Tree,
+    Blob,
+    Tag,
+}
+
+impl From<gix::object::Kind> for ObjectType {
+    fn from(kind: gix::object::Kind) -> Self {
+        match kind {
+            gix::object::Kind::Commit => Self::Commit,
+            gix::object::Kind::Tree => Self::Tree,
+            gix::object::Kind::Blob => Self::Blob,
+            gix::object::Kind::Tag => Self::Tag,
+        }
     }
 }
 
@@ -155,6 +188,21 @@ pub fn resolve_commit<'repo>(
         })
 }
 
+/// Resolve `rev` (default `HEAD`) to whatever object it names, without peeling tags.
+pub fn resolve_object<'repo>(
+    repo: &'repo gix::Repository,
+    rev: Option<&str>,
+) -> anyhow::Result<gix::Id<'repo>> {
+    let rev = rev.unwrap_or("HEAD");
+    ensure_head_is_born(repo, rev)?;
+    repo.rev_parse_single(rev).with_context(|| {
+        format!(
+            "cannot resolve `{rev}`; pass a branch, tag, full or abbreviated SHA, \
+             or an expression such as HEAD~2 (list_refs shows what exists)"
+        )
+    })
+}
+
 /// Resolve `rev` (default `HEAD`) to a tree: commits and tags are peeled.
 pub fn resolve_tree<'repo>(
     repo: &'repo gix::Repository,
@@ -232,6 +280,19 @@ pub fn pathspec_patterns(pathspec: &[String]) -> Vec<BString> {
 pub fn index_entry_kind(mode: gix::index::entry::Mode) -> gix::object::tree::EntryKind {
     mode.to_tree_entry_mode()
         .map_or(gix::object::tree::EntryKind::Blob, |m| m.kind())
+}
+
+/// The longest prefix of `text` that fits in `max_bytes` without splitting a character, and whether
+/// anything was cut off.
+pub fn clip_utf8(text: &str, max_bytes: usize) -> (&str, bool) {
+    if text.len() <= max_bytes {
+        return (text, false);
+    }
+    let mut end = max_bytes;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    (&text[..end], true)
 }
 
 /// Format an object id abbreviated to git's default seven hex digits.
@@ -401,6 +462,24 @@ mod tests {
         let err = format!("{:#}", resolve_commit(&empty, None).unwrap_err());
         assert!(err.contains("no commits yet"), "{err}");
         assert!(resolve_tree(&empty, None).is_err());
+    }
+
+    #[test]
+    fn clip_utf8_keeps_characters_whole() {
+        assert_eq!(clip_utf8("abc", 3), ("abc", false));
+        assert_eq!(clip_utf8("abc", 2), ("ab", true));
+        assert_eq!(clip_utf8("aé", 2), ("a", true));
+        assert_eq!(clip_utf8("é", 1), ("", true));
+    }
+
+    #[test]
+    fn resolve_object_keeps_tags() {
+        let (dir, _) = fixture_repo();
+        crate::tools::testutil::run_git(dir.path(), &["tag", "-a", "v2", "-m", "release"]);
+        let repo = crate::tools::testutil::open(dir.path());
+        let tag = resolve_object(&repo, Some("v2")).unwrap();
+        assert_eq!(tag.object().unwrap().kind, gix::object::Kind::Tag);
+        assert!(resolve_object(&repo, Some("nope")).is_err());
     }
 
     #[test]

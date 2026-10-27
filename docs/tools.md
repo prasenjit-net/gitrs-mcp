@@ -1,13 +1,13 @@
 # Tool reference
 
-gitrs-mcp exposes 13 read-only tools. This page covers each one: what it does, its arguments and defaults, the fields it returns, the errors it reports, and a real request and response.
+gitrs-mcp exposes 18 read-only tools. This page covers each one: what it does, its arguments and defaults, the fields it returns, the errors it reports, and a real request and response.
 
 - [Conventions](#conventions)
 - [Shared types](#shared-types)
-- Repository and refs: [`repo_info`](#repo_info), [`list_refs`](#list_refs), [`rev_parse`](#rev_parse), [`compare_refs`](#compare_refs)
+- Repository and refs: [`repo_info`](#repo_info), [`list_refs`](#list_refs), [`rev_parse`](#rev_parse), [`compare_refs`](#compare_refs), [`describe`](#describe), [`show_tag`](#show_tag), [`reflog`](#reflog), [`list_stashes`](#list_stashes)
 - Local changes: [`status`](#status), [`diff`](#diff)
 - Files: [`read_file`](#read_file), [`list_tree`](#list_tree), [`blame`](#blame)
-- History: [`log`](#log), [`show_commit`](#show_commit), [`file_history`](#file_history), [`search_commits`](#search_commits)
+- History: [`log`](#log), [`show_commit`](#show_commit), [`file_history`](#file_history), [`search_commits`](#search_commits), [`notes`](#notes)
 
 ## Conventions
 
@@ -25,7 +25,7 @@ These rules hold for every tool.
 
 - **Output** is JSON in `structuredContent`, described by each tool's published `outputSchema`. The same JSON is also sent as text content for clients that don't read structured output. SHAs are always full 40-character hex unless a field is named `short_id`.
 
-The examples come from a small demo repository: `main` has three commits (`Initial commit`, `Add shout`, `Document usage`) and a tag `v0.1.0` on `Add shout`; `feature` branches from `Add shout` with one commit, `Add farewell`. The working tree has an unstaged edit to `src/lib.rs`, a staged new file `src/main.rs`, and an untracked `notes.txt`. Each example shows the call's `arguments` and the `structuredContent` it returned. Local paths are shortened to `/path/to`.
+The examples come from a small demo repository, which [`scripts/demo-repo.sh`](../scripts/demo-repo.sh) builds with fixed dates so that its SHAs are reproducible: `main` has three commits (`Initial commit`, `Add shout`, `Document usage`) and an annotated tag `v0.1.0` on `Add shout`; `feature` branches from `Add shout` with one commit, `Add farewell`. `Document usage` has a note, and there is one stash. The working tree has an unstaged edit to `src/lib.rs`, a staged new file `src/main.rs`, and an untracked `notes.txt`. Each example shows the call's `arguments` and the `structuredContent` it returned. Local paths are shortened to `/path/to`.
 
 ## Shared types
 
@@ -249,6 +249,207 @@ How two revisions have diverged: their merge base, how many commits `head` is ah
 ```
 
 ---
+
+## `describe`
+
+Name a commit after the nearest tag in its history, like `git describe --always`. Use it to see which release a commit belongs to, or to label a build.
+
+**Arguments**
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `rev` | string | `HEAD` | Commit to describe. |
+| `tags` | boolean | `false` | Also consider lightweight tags, like `git describe --tags`. By default only annotated tags count. |
+| `long` | boolean | `false` | Always use the long form `<tag>-<n>-g<sha>`, even when the commit is tagged, like `--long`. |
+| `first_parent` | boolean | `false` | Follow only the first parent of merges, like `--first-parent`. |
+
+**Result**
+
+| Field | Type | Description |
+|---|---|---|
+| `description` | string | What `git describe --always` prints: `<tag>` on a tagged commit, `<tag>-<n>-g<short sha>` when the commit is `n` commits past the tag, or the short SHA alone when no tag is reachable. |
+| `tag` | string \| null | Short name of the nearest reachable tag; `null` when none is reachable. |
+| `depth` | integer | Commits in the described commit's history that aren't in the tag's; 0 without a tag. |
+| `exact` | boolean | True when the commit itself carries `tag`. |
+| `id` | string | Full SHA of the described commit. |
+
+Finding no tag isn't an error: the result falls back to the short SHA with `tag: null`, as `git describe --always` does.
+
+**Errors:** an unknown revision; a repository with no commits yet.
+
+**Examples**
+
+```json
+{}
+```
+
+```json
+{"depth": 1, "description": "v0.1.0-1-g67de0e9", "exact": false, "id": "67de0e9d5f784a1b2225dc65fef33f49b8a942d0", "tag": "v0.1.0"}
+```
+
+```json
+{"rev": "HEAD~1", "long": true}
+```
+
+```json
+{"depth": 0, "description": "v0.1.0-0-g5d06ac7", "exact": true, "id": "5d06ac74150faf79312e88be17be1d8d0b4b56d4", "tag": "v0.1.0"}
+```
+
+## `show_tag`
+
+Details of one tag: whether it is annotated or lightweight, the object it points at and the commit it peels to, and for an annotated tag its tagger, date, message and whether it is signed.
+
+**Arguments**
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `name` | string | required | Tag name, e.g. `v1.0` or `refs/tags/v1.0`. |
+
+**Result**
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | string | Full ref name, e.g. `refs/tags/v1.0`. |
+| `kind` | `annotated` \| `lightweight` | An annotated tag is a tag object with a tagger, date and message (`git tag -a`); a lightweight tag is a plain ref. |
+| `tag_id` | string \| null | Full SHA of the tag object; `null` for a lightweight tag. |
+| `target` | string | Full SHA the tag points at: the tag object's target, or the ref's target for a lightweight tag. |
+| `target_type` | `commit` \| `tree` \| `blob` \| `tag` | Type of `target`; `tag` when an annotated tag points at another tag. |
+| `peeled` | string | Full SHA after peeling every tag layer, usually a commit (`git rev-parse <tag>^{}`). |
+| `peeled_type` | `commit` \| `tree` \| `blob` \| `tag` | Type of `peeled`. |
+| `tagger` | Signature \| null | Who created the annotated tag, and when; `null` for a lightweight tag. |
+| `message` | string \| null | The annotated tag's message, without any signature block; `null` for a lightweight tag. |
+| `signed` | boolean | True when the annotated tag carries a PGP or SSH signature. The signature isn't verified. |
+
+**Errors:** no such tag: `` no tag named `v9`; list_refs with kind `tags` shows the tags that exist ``.
+
+**Example**
+
+```json
+{"name": "v0.1.0"}
+```
+
+```json
+{
+  "kind": "annotated",
+  "message": "First release\n\ngreet and shout.\n",
+  "name": "refs/tags/v0.1.0",
+  "peeled": "5d06ac74150faf79312e88be17be1d8d0b4b56d4",
+  "peeled_type": "commit",
+  "signed": false,
+  "tag_id": "01aff835697690674fd2017184bfbe67c288e94c",
+  "tagger": {"email": "ada@example.com", "name": "Ada Lovelace", "offset": 0, "time": 1790937600},
+  "target": "5d06ac74150faf79312e88be17be1d8d0b4b56d4",
+  "target_type": "commit"
+}
+```
+
+## `reflog`
+
+Where a ref pointed over time, newest first, like `git reflog show <ref>`. Each entry is one update: the commit before and after, who made it, and the message git recorded (`commit: …`, `checkout: moving from main to feature`, `reset: moving to HEAD~1`, `rebase …`). Use it to find commits lost to a reset or rebase, or to see recent branch switches.
+
+**Arguments**
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `ref` | string | `HEAD` | Ref whose reflog to read: `HEAD`, a branch such as `main`, or a full name such as `refs/heads/main`. Short names resolve like `git rev-parse`. |
+| `limit` | integer | 20 (max 500) | Maximum entries to return. |
+| `skip` | integer | 0 | Entries to skip first, for pagination. |
+
+**Result**
+
+| Field | Type | Description |
+|---|---|---|
+| `ref` | string | Full name of the ref whose log was read, e.g. `refs/heads/main` or `HEAD`. |
+| `entries[]` | array | Updates newest first. Empty when the ref has no reflog (tags normally don't). |
+| `entries[].selector` | string | Revision naming the entry, such as `HEAD@{2}` or `main@{0}`. Pass it to other tools as `rev`. |
+| `entries[].old_id` | string \| null | Full SHA before the update; `null` when the update created the ref. |
+| `entries[].new_id` | string | Full SHA after the update. |
+| `entries[].committer` | Signature | Who made the update, and when. |
+| `entries[].message` | string | What git recorded for the update. |
+| `truncated` | boolean | True if older entries exist past this page. |
+
+**Errors:** an unknown ref: `` no ref named `nope`; pass HEAD, a branch name, or a full ref name (list_refs shows what exists) ``.
+
+**Example**
+
+```json
+{"ref": "main", "limit": 2}
+```
+
+```json
+{
+  "entries": [
+    {
+      "committer": {"email": "ada@example.com", "name": "Ada Lovelace", "offset": 0, "time": 1791101700},
+      "message": "commit: Document usage",
+      "new_id": "67de0e9d5f784a1b2225dc65fef33f49b8a942d0",
+      "old_id": "5d06ac74150faf79312e88be17be1d8d0b4b56d4",
+      "selector": "main@{0}"
+    },
+    {
+      "committer": {"email": "ada@example.com", "name": "Ada Lovelace", "offset": 0, "time": 1790937000},
+      "message": "commit: Add shout",
+      "new_id": "5d06ac74150faf79312e88be17be1d8d0b4b56d4",
+      "old_id": "dff000b0866aea7e696479cecb3342c9cab947c4",
+      "selector": "main@{1}"
+    }
+  ],
+  "ref": "refs/heads/main",
+  "truncated": true
+}
+```
+
+## `list_stashes`
+
+The stash list, newest first, like `git stash list`. git keeps stashes as the reflog of `refs/stash`, and this tool reads it; creating or applying stashes comes with the write tools.
+
+**Arguments**
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `limit` | integer | 20 (max 500) | Maximum stashes to return. |
+| `skip` | integer | 0 | Stashes to skip first, for pagination. |
+
+**Result**
+
+| Field | Type | Description |
+|---|---|---|
+| `stashes[]` | array | Stashes newest first. Empty when there are none. |
+| `stashes[].index` | integer | Position in the list; 0 is the most recent stash. |
+| `stashes[].selector` | string | Revision naming the stash, e.g. `stash@{0}`. |
+| `stashes[].id` | string | Full SHA of the stash commit, which records the stashed worktree state. |
+| `stashes[].base` | string | Full SHA of the commit HEAD was on when the stash was made (the stash commit's first parent). |
+| `stashes[].branch` | string \| null | Branch HEAD was on when stashing; `null` when HEAD was detached. |
+| `stashes[].message` | string | The message `git stash list` shows, e.g. `WIP on main: 1a2b3c4 subject` or `On main: my message`. |
+| `stashes[].includes_untracked` | boolean | True when the stash also holds untracked files (`git stash -u` or `-a`). |
+| `stashes[].committer` | Signature | Who made the stash, and when. |
+| `truncated` | boolean | True if older stashes exist past this page. |
+
+To see what a stash holds, call `diff` with `from` set to its `base` and `to` set to its `selector`.
+
+**Example**
+
+```json
+{}
+```
+
+```json
+{
+  "stashes": [
+    {
+      "base": "67de0e9d5f784a1b2225dc65fef33f49b8a942d0",
+      "branch": "main",
+      "committer": {"email": "ada@example.com", "name": "Ada Lovelace", "offset": 0, "time": 1791105000},
+      "id": "f7cde13eeb4704536ab9c32cb9a13d2c9f2a74dc",
+      "includes_untracked": false,
+      "index": 0,
+      "message": "On main: try a new intro",
+      "selector": "stash@{0}"
+    }
+  ],
+  "truncated": false
+}
+```
 
 ## `status`
 
@@ -777,5 +978,50 @@ Find commits by message, author, date and changed path. Every filter you pass mu
     }
   ],
   "truncated": false
+}
+```
+
+## `notes`
+
+Notes attached to a commit or another object, like `git notes show`. Notes are text that tools and reviewers add to commits after the fact (for example review sign-offs or CI results) without changing the commit.
+
+**Arguments**
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `rev` | string | `HEAD` | Object whose notes to show. Usually a commit; tags aren't peeled, so an annotated tag's notes are the ones on the tag object, as in `git notes show`. |
+| `ref` | string | see description | Notes ref to read, e.g. `refs/notes/review`, or `review`, which expands to `refs/notes/review`. By default, `core.notesRef` (normally `refs/notes/commits`) plus any `notes.displayRef` refs. |
+| `max_bytes` | integer | 65536 (max 1048576) | Maximum bytes of text returned per note. |
+
+**Result**
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Full SHA of the object the notes are attached to. |
+| `notes[]` | array | One note per notes ref that annotates the object, in display order. Empty when there are none, including when the notes ref doesn't exist. |
+| `notes[].ref` | string | Notes ref the note comes from. |
+| `notes[].note_id` | string | Full SHA of the note's blob. |
+| `notes[].text` | string | The note text. Invalid UTF-8 is replaced with U+FFFD. |
+| `notes[].truncated` | boolean | True if `text` was cut at `max_bytes`. |
+
+**Errors:** an unknown revision; a repository with no commits yet.
+
+**Example**
+
+```json
+{}
+```
+
+```json
+{
+  "id": "67de0e9d5f784a1b2225dc65fef33f49b8a942d0",
+  "notes": [
+    {
+      "note_id": "6127b25d6086a22684f64503d9e7f8f921f4e7fb",
+      "ref": "refs/notes/commits",
+      "text": "Reviewed-by: Grace Hopper <grace@example.com>\n",
+      "truncated": false
+    }
+  ]
 }
 ```

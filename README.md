@@ -10,7 +10,7 @@ It lets AI assistants inspect a Git repository through typed tools with structur
 - **Structured output.** Every tool returns JSON with a published output schema. Bad input, such as an unknown revision, comes back as a tool error the model can read and correct.
 - **Pure Rust.** It runs as a single static binary that speaks MCP over stdio, and it doesn't need `libgit2` or the `git` executable.
 
-> **Status:** early development. Phases 0 and 1 of the [roadmap](ROADMAP.md) are done: 13 read-only tools covering status, diffs, file contents, history, blame and refs. Write tools come in Phase 3.
+> **Status:** early development. Phases 0 and 1 of the [roadmap](ROADMAP.md) are done, and Phase 2 is under way: 18 read-only tools covering status, diffs, file contents, history, blame, refs, tags, reflogs, stashes and notes. Write tools come in Phase 3.
 
 ## Install
 
@@ -81,9 +81,14 @@ Revision arguments accept anything `git rev-parse` does: SHAs and SHA prefixes, 
 | `rev_parse` | `spec` | Full SHAs and object type for a revision or a range (`a..b`, `a...b` with merge base) |
 | `compare_refs` | `base`, `head`, `limit?` | Merge base, ahead/behind counts, and the newest commits on each side |
 | `list_refs` | `kind?`: `branches` (default), `tags`, `all` | Refs with full and short names, peeled target commit, and which branch HEAD is on |
+| `describe` | `rev?`, `tags?`, `long?`, `first_parent?` | `git describe --always` name such as `v1.2-3-gabc1234`, with the tag, depth and exact-match flag |
+| `show_tag` | `name` | Annotated or lightweight, target and peeled commit, tagger, message, signed flag |
+| `reflog` | `ref?` (default `HEAD`), `limit?`, `skip?` | Where the ref pointed over time: `ref@{n}` selector, old and new commit, committer, message |
+| `list_stashes` | `limit?`, `skip?` | Stashes newest first: `stash@{n}`, commit, base commit, branch, message, untracked flag |
+| `notes` | `rev?`, `ref?`, `max_bytes?` | Notes attached to a commit or object, per notes ref |
 | `repo_info` | none | git dir, worktree, bare/shallow flags, current branch, HEAD commit, in-progress operation (merge, rebase, …) |
 
-The full reference, with every argument, result field, error and a real example per tool, is in [docs/tools.md](docs/tools.md). Later phases add `grep`, `describe`, reflog and stash inspection, then safe write tools behind `--allow-write`; see [ROADMAP.md](ROADMAP.md).
+The full reference, with every argument, result field, error and a real example per tool, is in [docs/tools.md](docs/tools.md). The rest of Phase 2 adds `grep`, merge previews, conflict inspection, ignore and attribute checks, config, worktree and submodule listings; Phase 3 adds safe write tools behind `--allow-write`. See [ROADMAP.md](ROADMAP.md).
 
 ## Documentation
 
@@ -117,13 +122,16 @@ src/
 └─ tools/           Git logic as plain sync functions over &gix::Repository
    ├─ mod.rs        shared types and helpers, test fixtures
    ├─ repo.rs       repo_info
-   ├─ refs.rs       list_refs
+   ├─ refs.rs       list_refs, describe, show_tag
+   ├─ reflog.rs     reflog, list_stashes
+   ├─ notes.rs      notes
    ├─ revision.rs   rev_parse, compare_refs
    ├─ status.rs     status
    ├─ diff.rs       diff
    ├─ files.rs      read_file, list_tree
    ├─ blame.rs      blame
    └─ history.rs    log, show_commit, file_history, search_commits
-scripts/smoke.sh    stdio MCP smoke test
-docs/               user and contributor documentation
+scripts/smoke.sh      stdio MCP smoke test
+scripts/demo-repo.sh  builds the demo repository the docs examples come from
+docs/                 user and contributor documentation
 ```

@@ -7,7 +7,7 @@ use gix::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::{LogEntry, page_limit, resolve_commit};
+use super::{LogEntry, ObjectType, page_limit, resolve_commit};
 
 const DEFAULT_COMPARE_LIMIT: usize = 20;
 const MAX_COMPARE_LIMIT: usize = 500;
@@ -36,27 +36,6 @@ pub enum SpecKind {
     IncludeOnlyParents,
     /// `rev^!`: `rev` without its parents. `ids` has one entry.
     ExcludeParents,
-}
-
-/// A git object type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum ObjectType {
-    Commit,
-    Tree,
-    Blob,
-    Tag,
-}
-
-impl From<gix::object::Kind> for ObjectType {
-    fn from(kind: gix::object::Kind) -> Self {
-        match kind {
-            gix::object::Kind::Commit => Self::Commit,
-            gix::object::Kind::Tree => Self::Tree,
-            gix::object::Kind::Blob => Self::Blob,
-            gix::object::Kind::Tag => Self::Tag,
-        }
-    }
 }
 
 #[derive(Debug, Serialize, JsonSchema)]

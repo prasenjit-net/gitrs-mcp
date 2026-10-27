@@ -4,19 +4,19 @@ A local-only Git MCP server in Rust on top of [gitoxide](https://github.com/Gito
 
 ## Status
 
-_Last updated 2026-10-26._
+_Last updated 2026-10-27._
 
 | Phase | Status |
 |---|---|
 | 0 Scaffold | ✅ Done: 4 tools |
 | 1 Core read | ✅ Done: 9 tools, each checked against the git CLI |
-| 2 Deep read and inspection | ⏭️ Next |
+| 2 Deep read and inspection | 🚧 In progress: 5 of 14 tools |
 | 3 Safe writes | Planned |
 | 4 History rewriting | Planned |
 | 5 MCP-native extras | Planned |
 | 6 Hardening and release | Planned |
 
-The server has 13 read-only tools. 77 unit tests and the end-to-end smoke test pass, with 94.8% line coverage. `--allow-write` is accepted but registers nothing until Phase 3.
+The server has 18 read-only tools. 97 unit tests and the end-to-end smoke test pass, with 94.7% line coverage. `--allow-write` is accepted but registers nothing until Phase 3.
 
 ## Design principles
 
@@ -37,7 +37,9 @@ src/
 └─ tools/
    ├─ mod.rs        shared output types (Signature, LogEntry, ChangeKind), arg helpers, test fixtures
    ├─ repo.rs       repo_info
-   ├─ refs.rs       list_refs
+   ├─ refs.rs       list_refs, describe, show_tag
+   ├─ reflog.rs     reflog, list_stashes
+   ├─ notes.rs      notes
    ├─ revision.rs   rev_parse, compare_refs
    ├─ status.rs     status
    ├─ diff.rs       diff (and the tree↔index comparison status reuses)
@@ -160,10 +162,10 @@ All nine tools shipped, each tested against the git CLI (`git status --porcelain
 | Tool | In → Out | gix |
 |---|---|---|
 | `grep` | `pattern` (regex), `rev \| worktree`, `pathspec`, `ignore_case`, `limit` → `matches[] {path, line, text}` | tree traversal + blob read; worktree via `dirwalk` honoring excludes |
-| `describe` | `rev` → `v1.2-3-gabc123` + parts | `commit.describe()` |
-| `show_tag` | `name` → tagger, message, target, kind | `find_reference` then `peel` |
-| `reflog` | `ref = HEAD`, `limit` → entries `{old, new, committer, message}` | `reference.log_iter()` |
-| `list_stashes` | → entries from `refs/stash` reflog | reflog read only; gix has no stash API |
+| `describe` ✅ | `rev` → `v1.2-3-gabc123` + parts | `commit.describe()` |
+| `show_tag` ✅ | `name` → tagger, message, target, kind | `find_reference` then `peel` |
+| `reflog` ✅ | `ref = HEAD`, `limit` → entries `{old, new, committer, message}` | `reference.log_iter()` |
+| `list_stashes` ✅ | → entries from `refs/stash` reflog | reflog read only; gix has no stash API |
 | `list_worktrees` | → `{path, branch, head, locked, prunable}` | `repo.worktrees()` |
 | `list_submodules` | → `{name, path, url, recorded_commit, checked_out_commit, state}` | `repo.submodules()` |
 | `conflicts` | → during a merge/rebase: `path`, ours/theirs/base blob ids and optional contents | index stages 1–3 via `open_index()` |
@@ -171,10 +173,21 @@ All nine tools shipped, each tested against the git CLI (`git status --porcelain
 | `check_attr` | `paths[]`, `attrs[]` → values | `repo.attributes(...)` |
 | `config_get` | `key` or `section` → values with scope (local/global/system) | `config_snapshot()`, values redacted: `credential.*`, `*.token`, `*password*`, `http.*.extraheader` |
 | `merge_preview` | `ours`, `theirs` → `clean: bool`, `conflicts[] {path, kind}`, resulting tree id | `merge_commits` in memory only. Nothing is written, so it is read-only and safe |
-| `notes` | `rev` → notes text | `repo.notes()` |
+| `notes` ✅ | `rev` → notes text | `repo.notes()` |
 | `count_objects` | → loose/packed counts and sizes, commit-graph present? | odb stats |
 
 **Exit criteria:** code-review and archaeology workflows (“is it safe to merge X into Y?”, “who touches this module?”) work without write access.
+
+### Phase 2: deviations from the plan
+
+- **Across tools.** `server.rs` was split into one router per area before the first Phase 2 tool landed. The docs examples now come from `scripts/demo-repo.sh`, which builds the demo repository with fixed dates so its SHAs are reproducible.
+- **`describe`.**
+  - When no tag is reachable it returns the short SHA with `tag: null`, like `git describe --always`, instead of failing.
+  - Added `tags`, `long` and `first_parent`. `--all` isn't offered: gix names branch candidates `main` where git prints `heads/main`, so the output wouldn't match git.
+- **`show_tag`.** Added `peeled`/`peeled_type` (the object after peeling every tag layer) and `signed`. Signatures are detected, not verified.
+- **`reflog`.** Each entry has a `selector` (`main@{2}`) that other tools accept as a revision. `old_id` is `null` for the entry that created the ref. Added `skip`.
+- **`list_stashes`.** Each stash reports its `base` commit, `branch` (parsed from the message), `includes_untracked`, and a `selector`. Paginated with `limit`/`skip`.
+- **`notes`.** Added `ref` (a notes ref, expanded like `git notes --ref`) and `max_bytes`. `rev` isn't peeled, so a tag's notes are those on the tag object, as in `git notes show`.
 
 ---
 
@@ -273,7 +286,7 @@ gix has no sequencer, so this phase is where we build our own logic on its primi
 |---|---|---|---|
 | 0 Scaffold | 4 | — | ✅ done |
 | 1 Core read | 9 | ~4.9k lines including tests (planned ~2–3k) | ✅ done |
-| 2 Deep read | 14 | ~2k LOC | ⏭️ next |
+| 2 Deep read | 14 | ~2k LOC | 🚧 5 of 14 |
 | 3 Safe writes | 10 | ~2–3k LOC (index writing and checkout safety are the hard parts) | planned |
 | 4 Rewriting | 8 | ~3–4k LOC (sequencer and stash) | planned |
 | 5 MCP extras | resources, prompts, progress, multi-repo | ~1.5k LOC | planned |

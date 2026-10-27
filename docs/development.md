@@ -53,7 +53,7 @@ Variables: `REPO=<path>` (default `.`), `ARGS="<extra server flags>"`, `LOG=<lev
 
 A tool is one function and one wrapper. Using a made-up `describe` tool as the example:
 
-1. **Pick the module.** Put the logic in the `tools/<area>.rs` file that fits, or create a new one and add it to `tools/mod.rs`. Check `tools/mod.rs` first for helpers you should reuse: `resolve_commit`, `resolve_tree`, `repo_path`, `page_limit`, `paginate`, `byte_budget`, `LogEntry`, `Signature`, `ChangeKind`.
+1. **Pick the module.** Put the logic in the `tools/<area>.rs` file that fits, or create a new one and add it to `tools/mod.rs`. Check `tools/mod.rs` first for helpers you should reuse: `resolve_commit`, `resolve_tree`, `resolve_object`, `repo_path`, `page_limit`, `paginate`, `byte_budget`, `clip_utf8`, `LogEntry`, `Signature`, `ChangeKind`, `ObjectType`.
 
 2. **Define the argument and result types.** Arguments derive `Deserialize + JsonSchema`, results derive `Serialize + JsonSchema`. Put a `///` comment on every field: these become the JSON Schema descriptions, which are all the model knows about the tool. State defaults, units, formats and what `null` means.
 
@@ -86,9 +86,9 @@ A tool is one function and one wrapper. Using a made-up `describe` tool as the e
    }
    ```
 
-5. **Test it** in the same file (see below), and add a call to `scripts/smoke.sh`.
+5. **Test it** in the same file (see below), and add a call to `scripts/smoke.sh`. If the call needs something the served repository may not have (a tag, a merge in progress), ask for something that can't exist and add the request id to `expect_error`: the smoke test then requires that call to return a tool error.
 
-6. **Document it** in the same change: a section in [tools.md](tools.md) with an example taken from real output, a row in the README's tool table, and the tool marked done in [ROADMAP.md](../ROADMAP.md).
+6. **Document it** in the same change: a section in [tools.md](tools.md) with an example taken from real output (build the demo repository with `scripts/demo-repo.sh <new dir>` and call the tool on it, for example in `make inspector REPO=<dir>`), a row in the README's tool table, and the tool marked done in [ROADMAP.md](../ROADMAP.md).
 
 ## Testing
 

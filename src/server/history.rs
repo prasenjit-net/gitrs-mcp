@@ -60,4 +60,17 @@ impl GitServer {
             .await
             .map(Json)
     }
+
+    /// Notes attached to a commit (default HEAD) or other object, like `git notes show`. Reads
+    /// `refs/notes/commits` (or `core.notesRef`) unless `ref` names another notes ref.
+    #[tool(annotations(title = "Notes", read_only_hint = true))]
+    async fn notes(
+        &self,
+        Parameters(args): Parameters<tools::notes::NotesArgs>,
+    ) -> Result<Json<tools::notes::NotesResult>, String> {
+        self.repo
+            .run(move |r| tools::notes::notes(r, args))
+            .await
+            .map(Json)
+    }
 }

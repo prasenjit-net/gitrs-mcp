@@ -8,15 +8,17 @@ gitrs-mcp is a single binary that serves one Git repository to an MCP client ove
 src/
 ├─ main.rs          CLI arguments, logging to stderr, stdio transport
 ├─ server/          MCP surface: server metadata (mod.rs) and one #[tool_router] per area
-│  ├─ repo.rs       repository, refs and revisions
+│  ├─ repo.rs       repository, refs, tags, reflogs and revisions
 │  ├─ changes.rs    working tree and index
 │  ├─ files.rs      file contents and blame
-│  └─ history.rs    commit history
+│  └─ history.rs    commit history and notes
 ├─ repo.rs          RepoHandle: opens the repository, runs gix calls on the blocking pool
 └─ tools/           Git logic, as plain synchronous functions over &gix::Repository
    ├─ mod.rs        shared types and helpers (Signature, LogEntry, ChangeKind, pagination, paths), test fixtures
    ├─ repo.rs       repo_info
-   ├─ refs.rs       list_refs
+   ├─ refs.rs       list_refs, describe, show_tag
+   ├─ reflog.rs     reflog, list_stashes (git keeps stashes as the reflog of refs/stash)
+   ├─ notes.rs      notes
    ├─ revision.rs   rev_parse, compare_refs
    ├─ status.rs     status
    ├─ diff.rs       diff, plus the tree/index comparison that status reuses
@@ -65,10 +67,10 @@ Path arguments go through one normalizer (`tools::repo_path`). It strips `./` an
 
 `tools/mod.rs` holds the helpers every tool uses, so behaviour stays the same everywhere:
 
-- `resolve_commit` / `resolve_tree`: revision defaults (`HEAD`), tag peeling, and actionable errors. An unborn HEAD gets its own message ("has no commits yet").
+- `resolve_commit` / `resolve_tree` / `resolve_object`: revision defaults (`HEAD`), tag peeling (none for `resolve_object`), and actionable errors. An unborn HEAD gets its own message ("has no commits yet").
 - `page_limit`, `paginate`: limits clamped to a per-tool default and maximum; pagination that reports `truncated` by pulling at most one item past the page, so lazy history walks stay cheap.
-- `byte_budget`: the per-call content budget (64 KiB default, 1 MiB maximum).
-- `Signature`, `LogEntry`, `ChangeKind`: the output types several tools share.
+- `byte_budget`, `clip_utf8`: the per-call content budget (64 KiB default, 1 MiB maximum), and cutting text to it without splitting a character.
+- `Signature`, `LogEntry`, `ChangeKind`, `ObjectType`: the output types several tools share.
 
 ## Matching git
 

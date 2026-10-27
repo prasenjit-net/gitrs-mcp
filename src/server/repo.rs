@@ -56,4 +56,58 @@ impl GitServer {
             .await
             .map(Json)
     }
+
+    /// Name a commit after the nearest tag in its history, like `git describe --always`: `v1.2` on a
+    /// tagged commit, `v1.2-3-gabc1234` three commits later, or the short SHA when no tag is reachable.
+    /// Uses annotated tags unless `tags: true`. Use it to see which release a commit belongs to.
+    #[tool(annotations(title = "Describe", read_only_hint = true))]
+    async fn describe(
+        &self,
+        Parameters(args): Parameters<tools::refs::DescribeArgs>,
+    ) -> Result<Json<tools::refs::DescribeResult>, String> {
+        self.repo
+            .run(move |r| tools::refs::describe(r, args))
+            .await
+            .map(Json)
+    }
+
+    /// Details of one tag: annotated or lightweight, the object it points at (and the commit it peels
+    /// to), and for annotated tags the tagger, date, message and whether it is signed.
+    #[tool(annotations(title = "Show tag", read_only_hint = true))]
+    async fn show_tag(
+        &self,
+        Parameters(args): Parameters<tools::refs::ShowTagArgs>,
+    ) -> Result<Json<tools::refs::ShowTagResult>, String> {
+        self.repo
+            .run(move |r| tools::refs::show_tag(r, args))
+            .await
+            .map(Json)
+    }
+
+    /// Where a ref (default HEAD) pointed over time, newest first, like `git reflog`: each update's old
+    /// and new commit, who made it and git's message (commit, checkout, reset, rebase, ...). Use it to
+    /// find lost commits or see recent branch switches. Paginated (`limit`, default 20).
+    #[tool(annotations(title = "Reflog", read_only_hint = true))]
+    async fn reflog(
+        &self,
+        Parameters(args): Parameters<tools::reflog::ReflogArgs>,
+    ) -> Result<Json<tools::reflog::ReflogResult>, String> {
+        self.repo
+            .run(move |r| tools::reflog::reflog(r, args))
+            .await
+            .map(Json)
+    }
+
+    /// The stash list, newest first, like `git stash list`: each stash's `stash@{n}` selector, commit,
+    /// base commit, branch and message. Inspect one with `show_commit` or `diff`. Paginated (`limit`, default 20).
+    #[tool(annotations(title = "List stashes", read_only_hint = true))]
+    async fn list_stashes(
+        &self,
+        Parameters(args): Parameters<tools::reflog::ListStashesArgs>,
+    ) -> Result<Json<tools::reflog::ListStashesResult>, String> {
+        self.repo
+            .run(move |r| tools::reflog::list_stashes(r, args))
+            .await
+            .map(Json)
+    }
 }

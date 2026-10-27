@@ -143,6 +143,18 @@ pub fn summarize(plan: Vec<Restore>, dry_run: bool) -> RestoreResult {
     }
 }
 
+/// The working-tree files a restore plan rewrites or deletes, as switching reports them.
+pub fn updated_files(plan: &[Restore]) -> Vec<UpdatedFile> {
+    plan.iter()
+        .filter_map(|r| {
+            Some(UpdatedFile {
+                path: r.path.to_string(),
+                change: r.worktree?,
+            })
+        })
+        .collect()
+}
+
 /// What to restore, from where, and into which of the index and working tree.
 pub struct RestoreRequest<'a> {
     pub paths: &'a [String],

@@ -39,7 +39,7 @@ Run `make` (or `make help`) for the full list.
 | `make test` | Unit tests. `make test-verbose` shows test output. |
 | `make fmt` / `make fmt-check` | Format, or check formatting. |
 | `make clippy` | Lint with warnings as errors. |
-| `make smoke` | End-to-end MCP round trip over stdio: initialize, `tools/list`, then one call to every read tool against `REPO`; then a second session with `--allow-write` that checks the write tools are listed only there and calls one in a way that can't change anything. Fails if any call has an unexpected outcome or gets no answer. |
+| `make smoke` | End-to-end MCP round trip over stdio: initialize, `tools/list`, then one call to every read tool against `REPO`; then a second session with `--allow-write` that checks the write tools are listed only there and calls some of them in ways that can't change anything. Fails if any call has an unexpected outcome or gets no answer. |
 | `make inspector` | Open the [MCP Inspector](https://github.com/modelcontextprotocol/inspector) against the server, to try tools by hand. |
 | `make check` | `fmt-check`, `clippy`, `test` and `smoke`: everything CI should run. |
 | `make coverage` | Line coverage summary; fails below 80% (`COVERAGE_MIN`). |

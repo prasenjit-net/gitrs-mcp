@@ -274,6 +274,152 @@ impl GitServer {
             .await
             .map(Json)
     }
+
+    /// Merge a branch or commit into the current branch, like `git merge`: fast-forwards when possible
+    /// (`fast_forward: never` always makes a merge commit, `only` refuses otherwise). On conflicts it
+    /// stops with git's merge state; resolve, `stage`, then `continue_operation` (or `abort_operation`).
+    /// Refuses up front if the index has staged changes or the merge would overwrite local changes.
+    #[tool(annotations(
+        title = "Merge",
+        read_only_hint = false,
+        destructive_hint = false,
+        idempotent_hint = false
+    ))]
+    async fn merge(
+        &self,
+        Parameters(args): Parameters<tools::integrate::MergeArgs>,
+    ) -> Result<Json<tools::integrate::OperationResult>, String> {
+        self.repo
+            .run(move |r| tools::integrate::merge(r, args))
+            .await
+            .map(Json)
+    }
+
+    /// Apply the change one commit made onto the current branch as a new commit, like `git cherry-pick`.
+    /// Stops on conflicts with git's cherry-pick state; resolve, `stage`, then `continue_operation`.
+    #[tool(annotations(
+        title = "Cherry-pick",
+        read_only_hint = false,
+        destructive_hint = false,
+        idempotent_hint = false
+    ))]
+    async fn cherry_pick(
+        &self,
+        Parameters(args): Parameters<tools::integrate::PickArgs>,
+    ) -> Result<Json<tools::integrate::OperationResult>, String> {
+        self.repo
+            .run(move |r| tools::integrate::cherry_pick(r, args))
+            .await
+            .map(Json)
+    }
+
+    /// Commit the inverse of one commit's change, like `git revert`. Stops on conflicts with git's revert
+    /// state; resolve, `stage`, then `continue_operation`.
+    #[tool(annotations(
+        title = "Revert",
+        read_only_hint = false,
+        destructive_hint = false,
+        idempotent_hint = false
+    ))]
+    async fn revert(
+        &self,
+        Parameters(args): Parameters<tools::integrate::PickArgs>,
+    ) -> Result<Json<tools::integrate::OperationResult>, String> {
+        self.repo
+            .run(move |r| tools::integrate::revert(r, args))
+            .await
+            .map(Json)
+    }
+
+    /// Replay the current branch's commits onto another commit, like `git rebase <onto>`; `todo` gives an
+    /// explicit plan (pick, reword, squash, fixup, drop) like `git rebase -i`. Stops on conflicts with
+    /// git's rebase state, so `continue_operation` or `git rebase --continue` can finish it.
+    #[tool(annotations(
+        title = "Rebase",
+        read_only_hint = false,
+        destructive_hint = false,
+        idempotent_hint = false
+    ))]
+    async fn rebase(
+        &self,
+        Parameters(args): Parameters<tools::rebase::RebaseArgs>,
+    ) -> Result<Json<tools::integrate::OperationResult>, String> {
+        self.repo
+            .run(move |r| tools::rebase::rebase(r, args))
+            .await
+            .map(Json)
+    }
+
+    /// Conclude the merge, cherry-pick, revert or rebase that stopped on conflicts, once every conflict is
+    /// resolved and staged, like `git commit` / `git rebase --continue` (`skip: true` for
+    /// `git rebase --skip`). Works on operations git started too.
+    #[tool(annotations(
+        title = "Continue",
+        read_only_hint = false,
+        destructive_hint = false,
+        idempotent_hint = false
+    ))]
+    async fn continue_operation(
+        &self,
+        Parameters(args): Parameters<tools::integrate::ContinueArgs>,
+    ) -> Result<Json<tools::integrate::OperationResult>, String> {
+        self.repo
+            .run(move |r| tools::integrate::continue_operation(r, args))
+            .await
+            .map(Json)
+    }
+
+    /// Abandon the merge, cherry-pick, revert or rebase in progress and return to where it started, like
+    /// `git merge --abort` / `git rebase --abort`. Conflict resolutions in progress are discarded; local
+    /// changes to files the operation didn't touch are kept.
+    #[tool(annotations(
+        title = "Abort",
+        read_only_hint = false,
+        destructive_hint = false,
+        idempotent_hint = false
+    ))]
+    async fn abort_operation(&self) -> Result<Json<tools::integrate::OperationResult>, String> {
+        self.repo
+            .run(tools::integrate::abort_operation)
+            .await
+            .map(Json)
+    }
+
+    /// Create a linked worktree (a second checkout of this repository) at `path`, on an existing branch,
+    /// a new branch (`create`), or a detached commit (`detach`), like `git worktree add`.
+    #[tool(annotations(
+        title = "Add worktree",
+        read_only_hint = false,
+        destructive_hint = false,
+        idempotent_hint = false
+    ))]
+    async fn worktree_add(
+        &self,
+        Parameters(args): Parameters<tools::worktrees::WorktreeAddArgs>,
+    ) -> Result<Json<tools::worktrees::WorktreeEntry>, String> {
+        self.repo
+            .run(move |r| tools::worktrees::worktree_add(r, args))
+            .await
+            .map(Json)
+    }
+
+    /// Delete a linked worktree's checkout and registration, like `git worktree remove`; its branch is
+    /// kept. Refuses dirty or locked worktrees unless `force`. Dry run by default.
+    #[tool(annotations(
+        title = "Remove worktree",
+        read_only_hint = false,
+        destructive_hint = true,
+        idempotent_hint = false
+    ))]
+    async fn worktree_remove(
+        &self,
+        Parameters(args): Parameters<tools::worktrees::WorktreeRemoveArgs>,
+    ) -> Result<Json<tools::worktrees::WorktreeRemoveResult>, String> {
+        self.repo
+            .run(move |r| tools::worktrees::worktree_remove(r, args))
+            .await
+            .map(Json)
+    }
 }
 
 #[cfg(test)]
@@ -423,5 +569,60 @@ mod tests {
             .await
             .unwrap();
         assert!(popped.0.dropped);
+
+        let merged = server
+            .merge(Parameters(tools::integrate::MergeArgs {
+                theirs: "main".into(),
+                message: None,
+                fast_forward: tools::integrate::FastForward::Allow,
+            }))
+            .await
+            .unwrap();
+        assert_eq!(merged.0.status, tools::integrate::OperationStatus::UpToDate);
+        let pick = tools::integrate::PickArgs { rev: "nope".into() };
+        assert!(server.cherry_pick(Parameters(pick)).await.is_err());
+        let pick = tools::integrate::PickArgs { rev: "nope".into() };
+        assert!(server.revert(Parameters(pick)).await.is_err());
+        crate::tools::testutil::run_git(dir.path(), &["checkout", "--", "a.txt"]);
+        let rebased = server
+            .rebase(Parameters(tools::rebase::RebaseArgs {
+                onto: "main".into(),
+                upstream: None,
+                todo: None,
+            }))
+            .await
+            .unwrap();
+        assert_eq!(
+            rebased.0.status,
+            tools::integrate::OperationStatus::UpToDate
+        );
+        let args = tools::integrate::ContinueArgs {
+            message: None,
+            skip: false,
+        };
+        assert!(server.continue_operation(Parameters(args)).await.is_err());
+        assert!(server.abort_operation().await.is_err());
+        let parent = tempfile::tempdir().unwrap();
+        let path = parent.path().join("wt");
+        let added = server
+            .worktree_add(Parameters(tools::worktrees::WorktreeAddArgs {
+                path: path.display().to_string(),
+                target: "spare".into(),
+                create: true,
+                start_point: None,
+                detach: false,
+            }))
+            .await
+            .unwrap();
+        assert_eq!(added.0.branch.as_deref(), Some("spare"));
+        let removed = server
+            .worktree_remove(Parameters(tools::worktrees::WorktreeRemoveArgs {
+                worktree: path.display().to_string(),
+                force: false,
+                dry_run: true,
+            }))
+            .await
+            .unwrap();
+        assert!(removed.0.dry_run);
     }
 }

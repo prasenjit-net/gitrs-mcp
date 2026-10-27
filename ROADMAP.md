@@ -12,11 +12,11 @@ _Last updated 2026-10-27._
 | 1 Core read | ✅ Done: 9 tools, each checked against the git CLI |
 | 2 Deep read and inspection | ✅ Done: 14 tools, each checked against the git CLI |
 | 3 Safe writes | ✅ Done: 10 tools behind `--allow-write`, each checked against the git CLI |
-| 4 History rewriting | 🚧 In progress: `reset` hard, `clean`, stashes |
+| 4 History rewriting | ✅ Done: 12 tools behind `--allow-write`, each checked against the git CLI, with git and gitrs-mcp able to continue each other's operations |
 | 5 MCP-native extras | Planned |
 | 6 Hardening and release | Planned |
 
-The server has 27 read-only tools, plus 14 write tools registered only with `--allow-write`. 202 unit tests and the end-to-end smoke test pass, with 96.2% line coverage.
+The server has 27 read-only tools, plus 22 write tools registered only with `--allow-write`. 220 unit tests and the end-to-end smoke test pass, with 96.2% line coverage.
 
 ## Design principles
 
@@ -300,12 +300,12 @@ gix has no sequencer, so this phase is where we build our own logic on its primi
 
 | Tool | Approach |
 |---|---|
-| `merge` | `merge_commits` → if clean, write the tree, create a merge commit, check out. If there are conflicts, write conflict stages to the index plus markers in the worktree and set `MERGE_HEAD`. Then `merge_continue` / `merge_abort` |
-| `cherry_pick` / `revert` | `merge_trees(base=parent, ours=HEAD, theirs=commit)` per commit (inverted for revert). Write `CHERRY_PICK_HEAD` on conflict |
-| `rebase` | Our own minimal sequencer: a list of picks in `.git/rebase-merge` (git-compatible layout, so `git rebase --continue` still works). Supports `onto`, `continue`, `abort` and `skip`. No interactive editor: `todo` comes in as a structured list (`pick`/`drop`/`squash`/`reword` with message) |
+| `merge` ✅ | `merge_commits` → if clean, write the tree, create a merge commit, check out. If there are conflicts, write conflict stages to the index plus markers in the worktree and set `MERGE_HEAD`. Then `merge_continue` / `merge_abort` |
+| `cherry_pick` / `revert` ✅ | `merge_trees(base=parent, ours=HEAD, theirs=commit)` per commit (inverted for revert). Write `CHERRY_PICK_HEAD` on conflict |
+| `rebase` ✅ | Our own minimal sequencer: a list of picks in `.git/rebase-merge` (git-compatible layout, so `git rebase --continue` still works). Supports `onto`, `continue`, `abort` and `skip`. No interactive editor: `todo` comes in as a structured list (`pick`/`drop`/`squash`/`reword` with message) |
 | `stash_push` / `stash_pop` / `stash_drop` ✅ | Implement git's stash commit layout (worktree commit with index and untracked parents) on `commit`/`write_tree`. **gap:** no gix support |
 | `reset` mode `hard` ✅ | With `dry_run`, it lists files that would lose changes |
-| `worktree_add` / `worktree_remove` | `.git/worktrees/<name>` layout and checkout |
+| `worktree_add` / `worktree_remove` ✅ | `.git/worktrees/<name>` layout and checkout |
 | `clean` ✅ | `dirwalk` untracked/ignored → `dry_run` lists them by default |
 
 **Exit criteria:** each operation leaves on-disk state that real `git` can continue or abort. Test this by interleaving gitrs-mcp and git CLI steps.
@@ -315,7 +315,7 @@ gix has no sequencer, so this phase is where we build our own logic on its primi
 - **`reset` mode `hard`.**
   - Reuses `restore`'s planner (index and worktree from the target commit, everything matched), and overwrites conflict stages as `git reset --hard` does.
   - `dry_run` defaults to true for `hard` only, so `soft` and `mixed` keep applying immediately. The result gains `files`, `files_count` and `discards_changes`, and `reset` is now annotated destructive.
-  - Like the other HEAD-moving tools, it refuses during an in-progress operation; `merge_abort` and friends will cover aborting.
+  - Like the other HEAD-moving tools, it refuses during an in-progress operation; `abort_operation` covers aborting.
   - gix skips a ref update that leaves the ref where it is, but git still logs `reset: moving to HEAD`, so `reset` appends those reflog entries itself.
 - **Stashes.**
   - `stash_push` writes git's layout (a `W` commit with HEAD, the index commit and an optional untracked-files commit as parents, and git's messages byte for byte). Tests check git can pop our stashes and we can pop git's. Pathspec-limited stashes (`git stash push -- <paths>`) aren't supported.
@@ -324,6 +324,21 @@ gix has no sequencer, so this phase is where we build our own logic on its primi
   - `stash_drop` is a dry run by default. gix can't delete one reflog entry, so the `refs/stash` reflog is rewritten under its lock.
 - **Submodules in `restore` and `reset --hard`.** Found while building stashes: restoring `.` in a repository with submodules refused because each submodule's directory "was in the way". Gitlinks now only change in the index, and their checkouts are never touched, as in git.
 - **`clean`.** Follows `git clean`: files only by default; `directories` (`-d`), `ignored: also` (`-x`) and `only` (`-X`). Nested repositories are always kept (git needs `-ff` to remove them). A dry run by default.
+- **Continuing and aborting.**
+  - Planned as `merge_continue` / `merge_abort` plus rebase `continue`/`abort`/`skip`. Shipped instead as `continue_operation` (with `skip` for rebases) and `abort_operation`, which work out from the repository state what's in progress. This also covers cherry-picks and reverts, and operations git started.
+  - `abort_operation` isn't annotated destructive. It discards only conflict resolutions in progress, like `git merge --abort`, and local changes to files the operation didn't touch are kept.
+  - Each operation writes git's state files byte for byte where git reads them back (`MERGE_MSG` with its `# Conflicts:` list, `MERGE_MODE`, `ORIG_HEAD`, `AUTO_MERGE` removal), plus git's reflog messages. Tests finish gitrs-mcp's operations with git and git's with gitrs-mcp.
+- **`merge`, `cherry_pick` and `revert`.**
+  - The merge is computed and checked in an in-memory object store first, then repeated for real under the index lock, so a refusal writes nothing.
+  - Like git's merge machinery, they refuse when the index has staged changes. Unstaged changes are kept, unless the merge would rewrite that file, in which case the whole operation refuses and names it.
+  - One revision per call; ranges and merge commits (`-m`) aren't supported. Merging takes one branch (no octopus), with git's default strategy (`ort`) and no strategy options. A cherry-pick whose change is already in HEAD is refused, as git does without `--allow-empty`.
+- **`rebase`.**
+  - It's a sequencer of our own on gix's tree merge, keeping its state in git's `.git/rebase-merge` layout (`git-rebase-todo`, `done`, `msgnum`, `end`, `author-script`, `stopped-sha`, `REBASE_HEAD`). So `git rebase --continue`, `--skip` and `--abort` work on our rebases, and `continue_operation` works on git's when every remaining step is one we support.
+  - Messages given for `reword` and `squash` steps are kept in an extra `gitrs-messages.json`, which git ignores. If git continues such a rebase, it uses the original messages.
+  - `exec`, `break`, `edit`, `label`, `reset` and `merge` steps aren't supported; a git rebase containing them is left for git to continue. Merge commits are left out (no `--rebase-merges`), and commits that become empty are dropped, as git does by default.
+  - The working tree and index must be clean (no `--autostash`), and HEAD must be on a branch.
+  - It doesn't use `--fork-point` or the configured upstream: `onto` is required, and `upstream` defaults to it.
+- **Worktrees.** `worktree_add` uses gix's `add_worktree`, and `worktree_remove` uses `prepare_remove_worktree`. A branch created for a new worktree is deleted again if the checkout fails. `worktree_remove` refuses the main worktree and the one being served. It's a dry run by default, and `force` covers both dirty and locked worktrees (`--force --force`).
 
 ---
 

@@ -10,7 +10,7 @@ It lets AI assistants inspect a Git repository through typed tools with structur
 - **Structured output.** Every tool returns JSON with a published output schema. Bad input, such as an unknown revision, comes back as a tool error the model can read and correct.
 - **Pure Rust.** It runs as a single static binary that speaks MCP over stdio, and it doesn't need `libgit2` or the `git` executable.
 
-> **Status:** early development. Phases 0–3 of the [roadmap](ROADMAP.md) are done: 27 read-only tools covering status, diffs, merge previews and conflicts, file contents, code search, ignore and attribute rules, history, blame, refs, tags, reflogs, stashes, notes, worktrees, submodules, config and object stats; and, with `--allow-write`, safe write tools for the local edit, stage, commit and branch loop. Phase 4 (history rewriting) is under way: hard resets, `clean` and stashes are in, with merge, cherry-pick, revert, rebase and worktrees to follow.
+> **Status:** early development. Phases 0–4 of the [roadmap](ROADMAP.md) are done: 27 read-only tools covering status, diffs, merge previews and conflicts, file contents, code search, ignore and attribute rules, history, blame, refs, tags, reflogs, stashes, notes, worktrees, submodules, config and object stats; and, with `--allow-write`, 22 write tools for the local edit, stage, commit and branch loop, plus merges, cherry-picks, reverts, rebases, stashes, hard resets, `clean` and worktrees. Merges and rebases that stop on conflicts leave git's own state, so you can finish them with either gitrs-mcp or git.
 
 ## Install
 
@@ -115,8 +115,16 @@ With `--allow-write`, these write tools are added:
 | `stash_push` | `message?`, `include_untracked?` | Stashes local changes in git's stash format and resets to HEAD |
 | `stash_pop` | `index?`, `restore_index?`, `drop?` (default true) | Applies a stash like `git stash pop`; refuses instead of conflicting |
 | `stash_drop` | `index?`, `dry_run?` (default **true**) | Drops a stash like `git stash drop` |
+| `merge` | `theirs`, `message?`, `fast_forward?` (`allow`, `never`, `only`) | Merges like `git merge`; stops on conflicts with git's merge state |
+| `cherry_pick` | `rev` | Applies one commit's change as a new commit, like `git cherry-pick` |
+| `revert` | `rev` | Commits the inverse of one commit, like `git revert` |
+| `rebase` | `onto`, `upstream?`, `todo?` (`pick`, `reword`, `squash`, `fixup`, `drop`) | Replays the branch onto `onto` like `git rebase`, or follows a structured interactive plan |
+| `continue_operation` | `message?`, `skip?` | Concludes a merge, cherry-pick, revert or rebase once conflicts are staged; also continues ones git started |
+| `abort_operation` | none | Abandons the operation in progress, like `git merge --abort` / `git rebase --abort` |
+| `worktree_add` | `path`, `target`, `create?`, `start_point?`, `detach?` | Adds a linked worktree like `git worktree add` |
+| `worktree_remove` | `worktree`, `force?`, `dry_run?` (default **true**) | Removes a linked worktree like `git worktree remove`; its branch is kept |
 
-The full reference, with every argument, result field, error and a real example per tool, is in [docs/tools.md](docs/tools.md). Phase 4 adds merges, rebases, cherry-picks and stashes; see [ROADMAP.md](ROADMAP.md).
+The full reference, with every argument, result field, error and a real example per tool, is in [docs/tools.md](docs/tools.md). What's next is in [ROADMAP.md](ROADMAP.md).
 
 ## Documentation
 
@@ -161,7 +169,7 @@ src/
    ├─ grep.rs       grep
    ├─ attributes.rs check_ignore, check_attr
    ├─ blame.rs      blame
-   ├─ worktrees.rs  list_worktrees
+   ├─ worktrees.rs  list_worktrees, worktree_add, worktree_remove
    ├─ write.rs      shared guards for write tools (refusals, names, identity)
    ├─ branches.rs   create_branch, delete_branch, rename_branch, create_tag
    ├─ staging.rs    stage, unstage
@@ -169,6 +177,8 @@ src/
    ├─ checkout.rs   restore, switch
    ├─ clean.rs      clean
    ├─ stash.rs      stash_push, stash_pop, stash_drop
+   ├─ integrate.rs  merge, cherry_pick, revert, continue_operation, abort_operation
+   ├─ rebase.rs     rebase (a sequencer using git's .git/rebase-merge layout)
    ├─ submodules.rs list_submodules
    ├─ config.rs     config_get (with secret redaction)
    ├─ objects.rs    count_objects

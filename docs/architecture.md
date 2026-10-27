@@ -29,7 +29,7 @@ src/
    ├─ grep.rs       grep
    ├─ attributes.rs check_ignore, check_attr
    ├─ blame.rs      blame
-   ├─ worktrees.rs  list_worktrees
+   ├─ worktrees.rs  list_worktrees, worktree_add, worktree_remove
    ├─ write.rs      guards shared by the write tools: refusals, name validation, identity, message cleanup
    ├─ branches.rs   create_branch, delete_branch, rename_branch, create_tag
    ├─ staging.rs    stage, unstage
@@ -37,6 +37,8 @@ src/
    ├─ checkout.rs   restore, switch: working-tree writes
    ├─ clean.rs      clean
    ├─ stash.rs      stash_push, stash_pop, stash_drop (git's stash layout, built on gix primitives)
+   ├─ integrate.rs  merge, cherry_pick, revert, continue_operation, abort_operation (three-way merges and git's state files)
+   ├─ rebase.rs     rebase, a sequencer that keeps its plan in git's .git/rebase-merge layout
    ├─ submodules.rs list_submodules
    ├─ config.rs     config_get, plus the secret redaction submodule URLs share
    ├─ objects.rs    count_objects
@@ -102,7 +104,8 @@ Results are meant to match the `git` CLI on the same repository, and the tests c
 - **Read-only by default.** Without `--allow-write`, every tool is read-only and annotated with `readOnlyHint`. `merge_preview` computes a full merge, but the blobs and trees it creates go to an in-memory object store that is dropped afterwards; a test checks that `.git/objects` is unchanged after a preview. As with `git merge-tree`, merge drivers and filters from the user's git configuration can run during the merge.
 - **Writes are opt-in and guarded.** The write tools live in their own router (`server/write.rs`), which `GitServer::new` adds only when `--allow-write` is given, so without the flag the model never sees them. Each write tool:
   - runs every check before writing anything, so a refusal leaves the repository byte for byte unchanged (each tool has a test that snapshots the whole repository around a refused call);
-  - refuses to move HEAD, rewrite the index or touch the working tree while a merge, rebase, cherry-pick, revert or bisect is in progress (`tools::write::ensure_idle`);
+  - refuses to move HEAD, rewrite the index or touch the working tree while a merge, rebase, cherry-pick, revert or bisect is in progress (`tools::write::ensure_idle`). The exceptions are `stage`, which resolves conflicts, and `continue_operation` / `abort_operation`, which finish or undo the operation;
+  - computes a merge, cherry-pick, revert or rebase step in an in-memory object store first and checks it against the index and working tree, then repeats it for real under the index lock. When it stops on conflicts, it leaves the state git leaves (conflict stages, markers, `MERGE_HEAD`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`, `MERGE_MSG`, `ORIG_HEAD`, `.git/rebase-merge/`), so `git commit`, `git rebase --continue` or `git merge --abort` can take over, and the reverse. Tests interleave gitrs-mcp and git steps to check this;
   - updates refs as compare-and-swap edits (`PreviousValue::MustExistAndMatch` / `MustNotExist`) under git's lock files, with git's reflog messages;
   - defaults to `dry_run: true` when it can lose data, and is annotated with `destructiveHint` then;
   - needs a committer identity from git config and refuses without one, rather than inventing it, and refuses to create unsigned commits or annotated tags when `commit.gpgSign` / `tag.gpgSign` asks for signatures;

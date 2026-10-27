@@ -15,9 +15,11 @@ pub mod diff;
 pub mod files;
 pub mod grep;
 pub mod history;
+pub mod integrate;
 pub mod merge;
 pub mod notes;
 pub mod objects;
+pub mod rebase;
 pub mod reflog;
 pub mod refs;
 pub mod repo;
@@ -484,6 +486,54 @@ pub(crate) mod testutil {
             let repo = open(dir.path());
             (dir, repo)
         })
+    }
+
+    /// git with fixed dates and no editor, so repositories built with it get identical commits.
+    pub fn pinned_git(root: &Path, args: &[&str]) {
+        run_git_with_env(
+            root,
+            args,
+            &[
+                ("GIT_AUTHOR_DATE", "@1800000000 +0000"),
+                ("GIT_COMMITTER_DATE", "@1800000000 +0000"),
+                ("GIT_EDITOR", "true"),
+            ],
+        );
+    }
+
+    /// Two repositories with identical commits (built with [`pinned_git`] by `setup`), for operations
+    /// whose output names commits, such as conflict markers and revert messages.
+    pub fn pinned_twins(setup: impl Fn(&Path)) -> [(tempfile::TempDir, gix::Repository); 2] {
+        [0, 1].map(|_| {
+            let (dir, _) = empty_repo();
+            setup(dir.path());
+            let repo = open(dir.path());
+            (dir, repo)
+        })
+    }
+
+    /// With [`pinned_git`]: `main` and `feature` from a shared base. `feature` edits `a` and adds `c`;
+    /// `main` edits `a` too when `conflict`, otherwise `b`.
+    pub fn diverged(root: &Path, conflict: bool) {
+        let git = |args: &[&str]| pinned_git(root, args);
+        write(root, "a", "one\n");
+        write(root, "b", "bee\n");
+        git(&["add", "."]);
+        git(&["commit", "-q", "-m", "base"]);
+        git(&["checkout", "-q", "-b", "feature"]);
+        write(root, "a", "theirs\n");
+        git(&["commit", "-q", "-am", "feature edit"]);
+        write(root, "c", "sea\n");
+        git(&["add", "c"]);
+        git(&["commit", "-q", "-m", "add c"]);
+        git(&["checkout", "-q", "main"]);
+        let (file, text) = if conflict {
+            ("a", "ours\n")
+        } else {
+            ("b", "bee, edited\n")
+        };
+        write(root, file, text);
+        git(&["commit", "-q", "-am", "main edit"]);
     }
 
     /// `git ls-files -s`: mode, blob, stage and path of every index entry.

@@ -1,6 +1,6 @@
 # Tool reference
 
-gitrs-mcp exposes 27 read-only tools, plus 14 write tools that are only available when the server runs with `--allow-write`. This page covers each one: what it does, its arguments and defaults, the fields it returns, the errors it reports, and a real request and response.
+gitrs-mcp exposes 27 read-only tools, plus 22 write tools that are only available when the server runs with `--allow-write`. This page covers each one: what it does, its arguments and defaults, the fields it returns, the errors it reports, and a real request and response.
 
 - [Conventions](#conventions)
 - [Shared types](#shared-types)
@@ -9,7 +9,7 @@ gitrs-mcp exposes 27 read-only tools, plus 14 write tools that are only availabl
 - Files: [`read_file`](#read_file), [`list_tree`](#list_tree), [`blame`](#blame), [`grep`](#grep), [`check_ignore`](#check_ignore), [`check_attr`](#check_attr)
 - History: [`log`](#log), [`show_commit`](#show_commit), [`file_history`](#file_history), [`search_commits`](#search_commits), [`notes`](#notes)
 - Repository setup: [`list_worktrees`](#list_worktrees), [`list_submodules`](#list_submodules), [`config_get`](#config_get), [`count_objects`](#count_objects)
-- [Write tools](#write-tools) (only with `--allow-write`): [`create_branch`](#create_branch), [`delete_branch`](#delete_branch), [`rename_branch`](#rename_branch), [`create_tag`](#create_tag), [`stage`](#stage), [`unstage`](#unstage), [`commit`](#commit), [`reset`](#reset), [`restore`](#restore), [`switch`](#switch), [`clean`](#clean), [`stash_push`](#stash_push), [`stash_pop`](#stash_pop), [`stash_drop`](#stash_drop)
+- [Write tools](#write-tools) (only with `--allow-write`): [`create_branch`](#create_branch), [`delete_branch`](#delete_branch), [`rename_branch`](#rename_branch), [`create_tag`](#create_tag), [`stage`](#stage), [`unstage`](#unstage), [`commit`](#commit), [`reset`](#reset), [`restore`](#restore), [`switch`](#switch), [`clean`](#clean), [`stash_push`](#stash_push), [`stash_pop`](#stash_pop), [`stash_drop`](#stash_drop), [`merge`](#merge), [`cherry_pick`](#cherry_pick), [`revert`](#revert), [`rebase`](#rebase), [`continue_operation`](#continue_operation), [`abort_operation`](#abort_operation), [`worktree_add`](#worktree_add), [`worktree_remove`](#worktree_remove)
 
 ## Conventions
 
@@ -1613,7 +1613,7 @@ These tools change the repository. They are only registered when the server is s
 
 - **Check first, then write.** Every check runs before anything is written, so a refused call leaves the repository byte for byte as it was. The tests prove this for each tool.
 - **No surprises with in-progress operations.** Tools that move HEAD, rewrite the index or touch the working tree refuse while a merge, rebase, cherry-pick, revert or bisect is in progress. Creating branches and tags is still allowed then, as in git.
-- **Destructive tools default to a dry run.** A tool that can lose data (`delete_branch`, `restore`, `reset` with `mode: hard`, `clean`, `stash_drop`) takes `dry_run` (default `true`) and runs every check without changing anything. Pass `dry_run: false` to act.
+- **Destructive tools default to a dry run.** A tool that can lose data (`delete_branch`, `restore`, `reset` with `mode: hard`, `clean`, `stash_drop`, `worktree_remove`) takes `dry_run` (default `true`) and runs every check without changing anything. Pass `dry_run: false` to act.
 - **Ref updates are compare-and-swap.** Each ref is updated only if it still points where the tool saw it, under git's lock files, so a concurrent `git` command can't be overwritten silently. Reflog entries use the same messages git writes.
 - **An identity is required.** Commits, tags and reflog entries record a committer from `user.name` and `user.email` in the git config (or the `GIT_COMMITTER_*` environment variables). Without one, the call is refused with instructions.
 - **The index is written like git writes it.** Index edits take `.git/index.lock` before reading the index, so a concurrent `git add` can't be lost, and write it back without the cache-tree, untracked-cache and fsmonitor extensions, which git rebuilds. A split index is written back as a regular one, with every entry; repositories using a sparse index are refused.
@@ -2244,5 +2244,322 @@ Remove a stash from the stash list, like `git stash drop`. Dry run by default. T
     "message": "On main: try a new intro",
     "selector": "stash@{0}"
   }
+}
+```
+
+## Merges, cherry-picks, reverts and rebases
+
+These tools share how they work and what they return.
+
+- **Checked before writing.** The merge is computed in memory and checked first. It refuses up front if the index has staged changes, if a file it would rewrite has local changes, or if an untracked file is in the way. Local changes to other files are kept.
+- **Conflicts stop the operation with git's own state:** conflict markers in the files, stages 1–3 in the index, and `MERGE_HEAD` / `CHERRY_PICK_HEAD` / `REVERT_HEAD`, `MERGE_MSG` and `ORIG_HEAD`, or `.git/rebase-merge` for a rebase. To finish, resolve the files, `stage` them, then call `continue_operation`, or `abort_operation` to give up. Git can continue or abort the operation instead (`git commit`, `git rebase --continue`, `git merge --abort`, …), and `continue_operation` / `abort_operation` work on operations git started.
+- **Git's messages and reflog entries.** Commits get the messages git would write (`Merge branch 'feature'`, `Revert "…"`), and reflogs get git's entries (`merge feature: Fast-forward`, `rebase (finish): …`).
+
+**OperationResult**
+
+| Field | Type | Description |
+|---|---|---|
+| `status` | string | `up_to_date`, `fast_forward`, `committed`, `stopped` (on conflicts), `aborted`, or `finished` (a rebase). |
+| `head` | string | Full SHA HEAD points to afterwards. |
+| `branch` | string \| null | Short name of the branch HEAD is on; `null` when detached, as during a rebase. |
+| `commit` | LogEntry \| null | The last commit created, if any. |
+| `conflicts` | string[] | When `stopped`: the conflicted paths. [`conflicts`](#conflicts) shows their versions. |
+| `updated[]` | array | Files changed in the working tree, each with a `path` and a ChangeKind `change`; at most 500. |
+| `updated_count` | integer | Number of changed files, including any beyond the listed 500. |
+| `rebase` | object \| null | For a rebase: `done` and `total` steps, and `stopped_at`, the commit being replayed when it stopped. |
+
+## `merge`
+
+Merge a branch or commit into the current branch, like `git merge`. It fast-forwards when it can; `fast_forward: "never"` always creates a merge commit (`--no-ff`), and `"only"` refuses when a merge commit would be needed (`--ff-only`).
+
+**Arguments**
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `theirs` | string | required | Branch, tag or commit to merge. |
+| `message` | string | git's | Message for the merge commit, e.g. the default `Merge branch 'feature'`. |
+| `fast_forward` | `allow` \| `never` \| `only` | `allow` | Whether to fast-forward. |
+
+**Result:** an [OperationResult](#merges-cherry-picks-reverts-and-rebases).
+
+**Errors:** staged changes; local changes or an untracked file in the way; `only` when a fast-forward isn't possible; an operation already in progress; an unknown revision; no commits yet; no committer identity.
+
+**Example**, run in the demo's linked worktree on `feature`, where both sides add `src/farewell.rs`:
+
+```json
+{"theirs": "polish"}
+```
+
+```json
+{
+  "branch": "feature",
+  "commit": null,
+  "conflicts": ["src/farewell.rs"],
+  "head": "e9383dc8fce1955c63812c2365edbff4efdffce4",
+  "rebase": null,
+  "status": "stopped",
+  "updated": [{"change": "modified", "path": "src/farewell.rs"}],
+  "updated_count": 1
+}
+```
+
+## `cherry_pick`
+
+Apply the change one commit made onto the current branch as a new commit, keeping its author and message, like `git cherry-pick`. A commit whose change is already in HEAD is refused, and merge commits aren't supported.
+
+**Arguments**
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `rev` | string | required | The commit to apply. |
+
+**Result:** an [OperationResult](#merges-cherry-picks-reverts-and-rebases).
+
+**Errors:** as for `merge`, plus a merge commit, or a change that's already applied.
+
+**Example**, on `feature`:
+
+```json
+{"rev": "main"}
+```
+
+```json
+{
+  "branch": "feature",
+  "commit": {
+    "author": {"email": "ada@example.com", "name": "Ada Lovelace", "offset": 0, "time": 1791101700},
+    "id": "e28cf6a4fb007d970be5e90deefd671f22f6df02",
+    "parents": ["e9383dc8fce1955c63812c2365edbff4efdffce4"],
+    "short_id": "e28cf6a",
+    "summary": "Document usage"
+  },
+  "conflicts": [],
+  "head": "e28cf6a4fb007d970be5e90deefd671f22f6df02",
+  "rebase": null,
+  "status": "committed",
+  "updated": [{"change": "modified", "path": "README.md"}],
+  "updated_count": 1
+}
+```
+
+## `revert`
+
+Commit the inverse of one commit's change, with git's message (`Revert "…"`, or `Reapply "…"` for a revert of a revert), like `git revert`.
+
+**Arguments**
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `rev` | string | required | The commit to revert. |
+
+**Result:** an [OperationResult](#merges-cherry-picks-reverts-and-rebases).
+
+**Errors:** as for `cherry_pick`.
+
+**Example**, on `feature`:
+
+```json
+{"rev": "HEAD"}
+```
+
+```json
+{
+  "branch": "feature",
+  "commit": {
+    "author": {"email": "ada@example.com", "name": "Ada Lovelace", "offset": 0, "time": 1791200000},
+    "id": "426b739e52a02f9acc3bf8bee0d23b8d47d6132c",
+    "parents": ["e9383dc8fce1955c63812c2365edbff4efdffce4"],
+    "short_id": "426b739",
+    "summary": "Revert \"Add farewell\""
+  },
+  "conflicts": [],
+  "head": "426b739e52a02f9acc3bf8bee0d23b8d47d6132c",
+  "rebase": null,
+  "status": "committed",
+  "updated": [{"change": "deleted", "path": "src/farewell.rs"}],
+  "updated_count": 1
+}
+```
+
+## `rebase`
+
+Replay the current branch's commits onto another commit, like `git rebase <onto>`. With `upstream`, it replays the commits that aren't in `upstream`, like `git rebase --onto <onto> <upstream>`. With `todo`, it follows an explicit plan, like an edited `git rebase -i` list:
+
+- **`pick`:** replay the commit as it is.
+- **`reword`:** replay it with a new `message`.
+- **`squash`:** fold it into the previous commit, combining the messages or using `message`.
+- **`fixup`:** fold it in, keeping the previous commit's message.
+- **`drop`:** leave it out.
+
+As in git, merge commits are left out, a commit that becomes empty because its change is already upstream is dropped, and a branch already on top of `onto` is reported `up_to_date`. The working tree and index must be clean. While the rebase runs HEAD is detached; when it finishes, the branch points to the new commits.
+
+**Arguments**
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `onto` | string | required | Commit to replay onto, e.g. `main`. |
+| `upstream` | string | `onto` | Replay the commits that aren't in this revision. |
+| `todo` | array | every commit, picked | Steps `{action, commit, message?}` with `action` one of `pick`, `reword`, `squash`, `fixup`, `drop`. |
+
+**Result:** an [OperationResult](#merges-cherry-picks-reverts-and-rebases) with `rebase` progress.
+
+**Errors:** local changes; a detached HEAD; `reword` without a `message`; `squash` or `fixup` as the first step; an operation in progress; an unknown revision.
+
+**Example**, on `feature`:
+
+```json
+{"onto": "main"}
+```
+
+```json
+{
+  "branch": "feature",
+  "commit": {
+    "author": {"email": "ada@example.com", "name": "Ada Lovelace", "offset": 0, "time": 1791036000},
+    "id": "8abfb34adefc26efa7a0839dca69a12d9a9a4582",
+    "parents": ["48ce6b19c89fc67695e4e723b8192fb167fb8f00"],
+    "short_id": "8abfb34",
+    "summary": "Add farewell"
+  },
+  "conflicts": [],
+  "head": "8abfb34adefc26efa7a0839dca69a12d9a9a4582",
+  "rebase": {"done": 1, "stopped_at": null, "total": 1},
+  "status": "finished",
+  "updated": [],
+  "updated_count": 0
+}
+```
+
+## `continue_operation`
+
+Conclude the merge, cherry-pick, revert or rebase that stopped on conflicts, once every conflict is resolved and staged. For a merge, cherry-pick or revert it creates the commit with the message git prepared (without its `#` comment lines) or `message`; for a rebase it commits the stopped step and carries on with the plan. `skip: true` leaves the stopped rebase step out instead, like `git rebase --skip`.
+
+**Arguments**
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `message` | string | git's prepared message | Message for the concluding commit (not for a rebase). |
+| `skip` | boolean | `false` | For a rebase: leave out the stopped commit. |
+
+**Result:** an [OperationResult](#merges-cherry-picks-reverts-and-rebases).
+
+**Errors:** nothing in progress; unresolved conflicts; `skip` outside a rebase; a rebase plan step gitrs-mcp can't run (such as `exec`), which is left for git.
+
+**Example**, in the demo's linked worktree, which is mid-merge with `src/farewell.rs` still conflicted:
+
+```json
+{}
+```
+
+```
+there are still unresolved conflicts; resolve and `stage` them first (`conflicts` lists them)
+```
+
+## `abort_operation`
+
+Abandon the merge, cherry-pick, revert or rebase in progress and return to where it started, like `git merge --abort` or `git rebase --abort`. Conflict resolutions in progress are discarded; local changes to files the operation didn't touch are kept.
+
+**Arguments:** none.
+
+**Result:** an [OperationResult](#merges-cherry-picks-reverts-and-rebases) with `status: "aborted"`.
+
+**Errors:** nothing in progress.
+
+**Example**, in the demo's linked worktree:
+
+```json
+{}
+```
+
+```json
+{
+  "branch": "feature",
+  "commit": null,
+  "conflicts": [],
+  "head": "e9383dc8fce1955c63812c2365edbff4efdffce4",
+  "rebase": null,
+  "status": "aborted",
+  "updated": [{"change": "modified", "path": "src/farewell.rs"}],
+  "updated_count": 1
+}
+```
+
+## `worktree_add`
+
+Create a linked worktree, a second checkout of the repository sharing its history, like `git worktree add`. It can be on an existing branch, a new branch (`create`, like `-b`), or a detached commit (`detach`). A branch can only be checked out in one worktree at a time.
+
+**Arguments**
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `path` | string | required | Where to create it: a new or empty directory, absolute or relative to the repository root. |
+| `target` | string | required | Branch to check out; with `create`, the new branch's name; with `detach`, any revision. |
+| `create` | boolean | `false` | Create `target` as a new branch at `start_point`. |
+| `start_point` | string | `HEAD` | Where a new branch starts. Only with `create`. |
+| `detach` | boolean | `false` | Check out `target` with a detached HEAD. |
+
+**Result:** the new worktree, as [`list_worktrees`](#list_worktrees) describes it.
+
+**Errors:** a destination that exists and isn't empty; no such branch; a branch checked out elsewhere; `create` for an existing branch; no committer identity.
+
+**Example**
+
+```json
+{"path": "../demo-hotfix", "target": "hotfix", "create": true, "start_point": "v0.1.0"}
+```
+
+```json
+{
+  "branch": "hotfix",
+  "detached": false,
+  "head": "41dad034dd469fe144a58a71bcd86453cd70ade1",
+  "id": "demo-hotfix",
+  "is_bare": false,
+  "is_current": false,
+  "is_main": false,
+  "lock_reason": null,
+  "locked": false,
+  "path": "/path/to/demo-hotfix",
+  "prunable": false
+}
+```
+
+## `worktree_remove`
+
+Delete a linked worktree's checkout and its registration, like `git worktree remove`. Its branch is kept. A worktree with uncommitted or untracked changes, or a locked one, is only removed with `force`. The worktree this server serves can't be removed. **Dry run by default.**
+
+**Arguments**
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `worktree` | string | required | The worktree: its path, its `id` from `list_worktrees`, or a unique end of its path. |
+| `force` | boolean | `false` | Remove it even when dirty or locked. |
+| `dry_run` | boolean | `true` | Only report what would be removed. |
+
+**Result**
+
+| Field | Type | Description |
+|---|---|---|
+| `path` | string | Absolute path of the checkout. |
+| `dirty` | boolean | True when it has uncommitted or untracked changes. |
+| `locked` | boolean | True when it's locked. |
+| `removed` | boolean | True when it was removed; false on a dry run. |
+| `dry_run` | boolean | Whether this was a dry run. |
+
+**Errors:** no such worktree; the main worktree or the one being served; dirty or locked without `force`.
+
+**Example**, the demo's locked, mid-merge worktree:
+
+```json
+{"worktree": "demo-review", "force": true}
+```
+
+```json
+{
+  "dirty": true,
+  "dry_run": true,
+  "locked": true,
+  "path": "/path/to/demo-review",
+  "removed": false
 }
 ```

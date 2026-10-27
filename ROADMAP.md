@@ -2,6 +2,22 @@
 
 A local-only Git MCP server in Rust on top of [gitoxide](https://github.com/GitoxideLabs/gitoxide) (`gix` 0.90) and the official MCP SDK (`rmcp` 3.7), speaking MCP over stdio.
 
+## Status
+
+_Last updated 2026-10-26._
+
+| Phase | Status |
+|---|---|
+| 0 Scaffold | ✅ Done: 4 tools |
+| 1 Core read | ✅ Done: 9 tools, each checked against the git CLI |
+| 2 Deep read and inspection | ⏭️ Next |
+| 3 Safe writes | Planned |
+| 4 History rewriting | Planned |
+| 5 MCP-native extras | Planned |
+| 6 Hardening and release | Planned |
+
+The server has 13 read-only tools. 77 unit tests and the end-to-end smoke test pass, with 94.8% line coverage. `--allow-write` is accepted but registers nothing until Phase 3.
+
 ## Design principles
 
 1. **Local only, by construction.** `gix` is built without any `*-network-client` / `*-http-transport-*` feature, so fetch, push, clone and ls-remote can't be compiled in. Tools never read remote credentials.
@@ -58,49 +74,49 @@ These tools let an agent understand "what's going on in this repo" without shell
 
 All nine tools shipped, each tested against the git CLI (`git status --porcelain=v2`, `git diff` numstat, name-status and full patch text, `git apply --index`, `git ls-tree`, `git log -- <path>`, `git log --follow`, `git rev-list`, `git rev-parse`, `git merge-base`, `git blame --porcelain`). The full reference is in [docs/tools.md](docs/tools.md). Where the implementation differs from the specs below, the reasons are in [Phase 1: deviations from the plan](#phase-1-deviations-from-the-plan).
 
-### `status`
+### `status` ✅
 - **In:** `pathspec?: string[]`, `include_untracked: bool = true`, `include_ignored: bool = false`.
 - **Out:** `branch`, `head`, `upstream: null` (local-only), `staged[]`, `unstaged[]`, `untracked[]`, `conflicted[]`. Each entry has `{path, change: added|modified|deleted|renamed|typechange, old_path?}`.
 - **gix:** `repo.status(progress)` then `.into_iter()` (index↔worktree and tree↔index). Untracked files come from the `dirwalk` integration.
 - **Tests:** compare with `git status --porcelain=v2` for every change type, including renames and a submodule.
 
-### `diff`
+### `diff` ✅
 - **In:** `from?: rev`, `to?: rev`, `staged: bool`, `pathspec?: string[]`, `format: stat|name_status|patch = stat`, `context_lines = 3`, `max_bytes`.
 - **Modes:** worktree↔index (default), index↔HEAD (`staged`), and rev↔rev.
 - **Out:** `files[] {path, old_path?, status, additions, deletions, binary, patch?}`, `totals`, `truncated`.
 - **gix:** `diff_tree_to_tree` with rename tracking, the `status` iterator for the worktree/index sides, `diff_resource_cache` with `gix-imara-diff` for unified hunks.
 - **Tests:** match `git diff --numstat` and `--name-status`. Patch text must apply cleanly with `git apply --check`.
 
-### `read_file`
+### `read_file` ✅
 - **In:** `path`, `rev = HEAD` (or `"index"` / `"worktree"`), `offset_bytes?`, `max_bytes`.
 - **Out:** `content` (utf-8) or `base64` with `binary: true`, plus `size`, `blob_id`, `truncated`.
 - **gix:** `rev_parse_single("<rev>:<path>")`, then `object().detach()`. Index reads use `index().entry_by_path`.
 
-### `list_tree`
+### `list_tree` ✅
 - **In:** `rev = HEAD`, `path?`, `recursive = false`, `limit`.
 - **Out:** `entries[] {path, kind: blob|tree|commit(submodule)|symlink, mode, id, size?}`.
 - **gix:** `commit.tree()`, then `peel_to_entry_by_path` and `traverse().breadthfirst`.
 
-### `rev_parse`
+### `rev_parse` ✅
 - **In:** `spec` (also ranges such as `a..b` and `a...b`).
 - **Out:** `{kind: single|range|merge_base_range, ids[], object_type}`.
 - **gix:** `repo.rev_parse(spec)`, which returns a `revision::Spec`.
 
-### `file_history`
+### `file_history` ✅
 - **In:** `path`, `rev = HEAD`, `limit`, `follow_renames = false`.
 - **Out:** a list of `LogEntry` plus `change` for the path at each commit.
 - **gix:** walk and tree-diff each commit against its first parent, filtered by path. Rename following comes later, behind a flag.
 
-### `search_commits`
+### `search_commits` ✅
 - **In:** `message_regex?`, `author?`, `since?`, `until?`, `path?`, `rev = HEAD`, `limit`.
 - **gix:** `rev_walk` with the commit-time cutoff `Sorting::ByCommitTimeCutoff` and in-process filtering (`regex` is already pulled in by `revparse-regex`).
 
-### `compare_refs`
+### `compare_refs` ✅
 - **In:** `base`, `head`.
 - **Out:** `merge_base`, `ahead`, `behind`, `ahead_commits[]` (capped), `behind_commits[]` (capped).
 - **gix:** `merge_base`, plus a `rev_walk(...).with_hidden(...)` count in each direction.
 
-### `blame`
+### `blame` ✅
 - **In:** `path`, `rev = HEAD`, `line_range?: [start, end]`.
 - **Out:** `hunks[] {start_line, lines, commit_id, author, summary, original_path}`.
 - **gix:** `repo.blame_file` (the `blame` feature is already enabled).
@@ -253,12 +269,12 @@ gix has no sequencer, so this phase is where we build our own logic on its primi
 
 ## Milestone summary
 
-| Phase | Tools | Rough size |
-|---|---|---|
-| 0 Scaffold | 4 | done |
-| 1 Core read | 9 | done |
-| 2 Deep read | 14 | ~2k LOC |
-| 3 Safe writes | 10 | ~2–3k LOC (index writing and checkout safety are the hard parts) |
-| 4 Rewriting | 8 | ~3–4k LOC (sequencer and stash) |
-| 5 MCP extras | resources, prompts, progress, multi-repo | ~1.5k LOC |
-| 6 Hardening | — | ongoing |
+| Phase | Tools | Rough size | Status |
+|---|---|---|---|
+| 0 Scaffold | 4 | — | ✅ done |
+| 1 Core read | 9 | ~4.9k lines including tests (planned ~2–3k) | ✅ done |
+| 2 Deep read | 14 | ~2k LOC | ⏭️ next |
+| 3 Safe writes | 10 | ~2–3k LOC (index writing and checkout safety are the hard parts) | planned |
+| 4 Rewriting | 8 | ~3–4k LOC (sequencer and stash) | planned |
+| 5 MCP extras | resources, prompts, progress, multi-repo | ~1.5k LOC | planned |
+| 6 Hardening | — | ongoing | planned |

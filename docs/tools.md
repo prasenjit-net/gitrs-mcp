@@ -1,6 +1,6 @@
 # Tool reference
 
-gitrs-mcp exposes 27 read-only tools, plus 4 write tools that are only available when the server runs with `--allow-write`. This page covers each one: what it does, its arguments and defaults, the fields it returns, the errors it reports, and a real request and response.
+gitrs-mcp exposes 27 read-only tools, plus 6 write tools that are only available when the server runs with `--allow-write`. This page covers each one: what it does, its arguments and defaults, the fields it returns, the errors it reports, and a real request and response.
 
 - [Conventions](#conventions)
 - [Shared types](#shared-types)
@@ -9,7 +9,7 @@ gitrs-mcp exposes 27 read-only tools, plus 4 write tools that are only available
 - Files: [`read_file`](#read_file), [`list_tree`](#list_tree), [`blame`](#blame), [`grep`](#grep), [`check_ignore`](#check_ignore), [`check_attr`](#check_attr)
 - History: [`log`](#log), [`show_commit`](#show_commit), [`file_history`](#file_history), [`search_commits`](#search_commits), [`notes`](#notes)
 - Repository setup: [`list_worktrees`](#list_worktrees), [`list_submodules`](#list_submodules), [`config_get`](#config_get), [`count_objects`](#count_objects)
-- [Write tools](#write-tools) (only with `--allow-write`): [`create_branch`](#create_branch), [`delete_branch`](#delete_branch), [`rename_branch`](#rename_branch), [`create_tag`](#create_tag)
+- [Write tools](#write-tools) (only with `--allow-write`): [`create_branch`](#create_branch), [`delete_branch`](#delete_branch), [`rename_branch`](#rename_branch), [`create_tag`](#create_tag), [`stage`](#stage), [`unstage`](#unstage)
 
 ## Conventions
 
@@ -1616,7 +1616,8 @@ These tools change the repository. They are only registered when the server is s
 - **Destructive tools default to a dry run.** A tool that can lose data, such as `delete_branch`, takes `dry_run` (default `true`) and runs every check without changing anything. Pass `dry_run: false` to act.
 - **Ref updates are compare-and-swap.** Each ref is updated only if it still points where the tool saw it, under git's lock files, so a concurrent `git` command can't be overwritten silently. Reflog entries use the same messages git writes.
 - **An identity is required.** Commits, tags and reflog entries record a committer from `user.name` and `user.email` in the git config (or the `GIT_COMMITTER_*` environment variables). Without one, the call is refused with instructions.
-- **Results describe the new state**, such as a ref's new target, so a follow-up read isn't needed.
+- **The index is written like git writes it.** Index edits take `.git/index.lock` before reading the index, so a concurrent `git add` can't be lost, and write it back without the cache-tree, untracked-cache and fsmonitor extensions, which git rebuilds. A split index is written back as a regular one, with every entry; repositories using a sparse index are refused.
+- **Results describe the new state**, such as a ref's new target or how many paths are staged, so a follow-up read isn't needed.
 
 The examples in this part ran against a freshly built demo for each call, with `GIT_COMMITTER_DATE` fixed so the SHAs are reproducible.
 
@@ -1744,8 +1745,8 @@ Rename a local branch, like `git branch -m`. The reflog and `branch.<name>.*` co
 {
   "head_updated": false,
   "name": "refs/heads/farewell-wording",
-  "previous": null,
   "renamed_from": "refs/heads/polish",
+  "replaced": null,
   "short_name": "farewell-wording",
   "target": "10fd2e0634518dfc3f069fe8de98d03b71c333ef"
 }
@@ -1787,4 +1788,66 @@ Create a tag, like `git tag`. With a `message` the tag is annotated: a tag objec
   "target": "48ce6b19c89fc67695e4e723b8192fb167fb8f00",
   "target_type": "commit"
 }
+```
+
+## `stage`
+
+Stage working-tree changes for the next commit, like `git add <paths>`, or `git add -A` with `all: true`. Modified, deleted and new files that match are staged, with `.gitattributes` filters and line-ending conversion applied, and the executable bit and symlinks recorded as git does (`core.fileMode` is honoured). Staging a conflicted file marks its conflict resolved. A submodule that has a different commit checked out records that commit.
+
+Ignored files are never staged. One named explicitly (git would refuse it without `--force`) is listed in `skipped`, as is a nested repository, which belongs in a submodule. Staging is allowed while a merge or rebase is in progress, because that's how conflicts are resolved.
+
+**Arguments**
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `paths` | string[] | `[]` | Paths or pathspec patterns to stage, e.g. `src/main.rs`, `src/`, `*.rs`. Required unless `all` is set. |
+| `all` | boolean | `false` | Stage every change in the working tree, including deletions and untracked files. |
+
+**Result**
+
+| Field | Type | Description |
+|---|---|---|
+| `changed[]` | array | What this call changed in the index, ordered by path; at most 500 entries. |
+| `changed[].path` | string | Path relative to the repository root. |
+| `changed[].change` | ChangeKind | For `stage`: how the index entry changed. For `unstage`: the kind of staged change that was undone. |
+| `changed[].resolved_conflict` | boolean | Present and true when staging the path resolved its merge conflict. |
+| `changed_count` | integer | Number of paths this call changed, including any beyond the listed 500. |
+| `skipped[]` | array | Paths that matched but were left alone, each with a `path` and a `reason`. |
+| `staged_total` | integer | Number of paths that now differ between HEAD and the index: what `commit` would record. |
+
+**Errors:** neither or both of `paths` and `all`; a pathspec that matches nothing in the index or working tree; a bare repository; the index is locked by another git process.
+
+**Example**
+
+```json
+{"paths": ["src/lib.rs"]}
+```
+
+```json
+{"changed": [{"change": "modified", "path": "src/lib.rs"}], "changed_count": 1, "skipped": [], "staged_total": 2}
+```
+
+## `unstage`
+
+Undo staged changes, like `git restore --staged <paths>` (or `git reset` with `all: true`): the index entries go back to HEAD's version, and files HEAD doesn't have leave the index. The working tree isn't touched, so the changes stay as unstaged edits. In a repository with no commits yet, everything matching is removed from the index. Refused while an operation is in progress.
+
+**Arguments**
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `paths` | string[] | `[]` | Paths or pathspec patterns to unstage. Required unless `all` is set. |
+| `all` | boolean | `false` | Unstage everything. |
+
+**Result:** the same fields as [`stage`](#stage).
+
+**Errors:** neither or both of `paths` and `all`; an operation in progress; a bare repository; the index is locked.
+
+**Example**
+
+```json
+{"paths": ["src/main.rs"]}
+```
+
+```json
+{"changed": [{"change": "added", "path": "src/main.rs"}], "changed_count": 1, "skipped": [], "staged_total": 0}
 ```

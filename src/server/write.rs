@@ -83,6 +83,44 @@ impl GitServer {
             .await
             .map(Json)
     }
+
+    /// Stage working-tree changes for the next commit, like `git add <paths>` (or `git add -A` with
+    /// `all: true`): modifications, deletions and new files, with `.gitattributes` filters applied.
+    /// Staging a conflicted file marks it resolved. Ignored files named explicitly are skipped and
+    /// reported. Returns what changed and how many paths are now staged.
+    #[tool(annotations(
+        title = "Stage",
+        read_only_hint = false,
+        destructive_hint = false,
+        idempotent_hint = true
+    ))]
+    async fn stage(
+        &self,
+        Parameters(args): Parameters<tools::staging::StageArgs>,
+    ) -> Result<Json<tools::staging::IndexUpdateResult>, String> {
+        self.repo
+            .run(move |r| tools::staging::stage(r, args))
+            .await
+            .map(Json)
+    }
+
+    /// Undo staged changes, resetting the index entries for `paths` (or `all: true`) to HEAD, like
+    /// `git restore --staged`. The working tree is not touched, so the changes stay as unstaged edits.
+    #[tool(annotations(
+        title = "Unstage",
+        read_only_hint = false,
+        destructive_hint = false,
+        idempotent_hint = true
+    ))]
+    async fn unstage(
+        &self,
+        Parameters(args): Parameters<tools::staging::UnstageArgs>,
+    ) -> Result<Json<tools::staging::IndexUpdateResult>, String> {
+        self.repo
+            .run(move |r| tools::staging::unstage(r, args))
+            .await
+            .map(Json)
+    }
 }
 
 #[cfg(test)]
@@ -138,5 +176,23 @@ mod tests {
             .err()
             .expect("the call is refused");
         assert!(err.contains("already exists"), "{err}");
+
+        crate::tools::testutil::write(dir.path(), "a.txt", "edited\n");
+        let staged = server
+            .stage(Parameters(tools::staging::StageArgs {
+                paths: vec!["a.txt".into()],
+                all: false,
+            }))
+            .await
+            .unwrap();
+        assert_eq!(staged.0.staged_total, 1);
+        let unstaged = server
+            .unstage(Parameters(tools::staging::UnstageArgs {
+                paths: vec![],
+                all: true,
+            }))
+            .await
+            .unwrap();
+        assert_eq!(unstaged.0.staged_total, 0);
     }
 }

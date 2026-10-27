@@ -28,6 +28,69 @@ pub fn ensure_idle(repo: &gix::Repository, action: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The working tree root, or an error explaining that a bare repository has none.
+pub fn require_worktree<'repo>(
+    repo: &'repo gix::Repository,
+    action: &str,
+) -> anyhow::Result<&'repo Path> {
+    repo.workdir().with_context(|| {
+        format!("cannot {action}: this repository is bare and has no working tree")
+    })
+}
+
+/// Read-modify-write the index the way git does: take `index.lock` first so a concurrent `git add`
+/// can't be lost, apply `edit`, then write and release. If `edit` fails, the lock is dropped and the
+/// index stays as it was.
+///
+/// Only the end-of-index-entry extension is written back. The cache-tree would be stale after an
+/// edit (gix writes it unchanged), and git rebuilds the untracked cache and fsmonitor data itself.
+pub fn update_index<T>(
+    repo: &gix::Repository,
+    edit: impl FnOnce(&mut gix::index::State) -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
+    let path = repo.index_path();
+    let lock = gix::lock::File::acquire_to_update_resource(
+        &path,
+        gix::lock::acquire::Fail::Immediately,
+        None,
+        0,
+    )
+    .context(
+        "the index is locked (`.git/index.lock` exists): another git process is using it; retry \
+         when it has finished, or delete the lock file if no git process is running",
+    )?;
+    let mut index = if path.is_file() {
+        gix::index::File::at(&path, repo.object_hash(), false, Default::default())?
+    } else {
+        gix::index::File::from_state(gix::index::State::new(repo.object_hash()), path)
+    };
+    // A split index was already merged with its shared index when read, so writing it back whole
+    // keeps every entry. A sparse index has directory entries the write tools don't handle.
+    if index.is_sparse() {
+        bail!(
+            "this repository uses a sparse index, which gitrs-mcp can't write; turn it off with \
+             `git sparse-checkout disable`, or use git"
+        );
+    }
+    let out = edit(&mut index)?;
+    index.sort_entries();
+    let options = gix::index::write::Options {
+        extensions: gix::index::write::Extensions::Given {
+            tree_cache: false,
+            end_of_index_entry: true,
+        },
+        skip_hash: false,
+    };
+    let mut writer = std::io::BufWriter::new(lock);
+    index.write_to(&mut writer, options)?;
+    writer
+        .into_inner()
+        .map_err(|err| err.into_error())?
+        .commit()
+        .map_err(|err| err.error)?;
+    Ok(out)
+}
+
 /// The identity to record as committer, and in reflogs.
 pub fn committer(repo: &gix::Repository) -> anyhow::Result<gix::actor::Signature> {
     let signature = repo.committer().context(NO_IDENTITY)??;

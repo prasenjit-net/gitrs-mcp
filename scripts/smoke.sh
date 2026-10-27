@@ -51,7 +51,7 @@ requests=(
 last_id=29
 expect_error='17' # space-separated request ids that must return a tool error
 
-write_tools='create_branch delete_branch rename_branch create_tag'
+write_tools='create_branch delete_branch rename_branch create_tag stage unstage'
 write_requests=(
   "${requests[@]:0:3}"
   # A dry run (the default) on a branch that can't exist: refused, and nothing would change anyway.

@@ -11,12 +11,12 @@ _Last updated 2026-10-27._
 | 0 Scaffold | ✅ Done: 4 tools |
 | 1 Core read | ✅ Done: 9 tools, each checked against the git CLI |
 | 2 Deep read and inspection | ✅ Done: 14 tools, each checked against the git CLI |
-| 3 Safe writes | 🚧 In progress: 4 of 10 tools |
+| 3 Safe writes | 🚧 In progress: 6 of 10 tools |
 | 4 History rewriting | Planned |
 | 5 MCP-native extras | Planned |
 | 6 Hardening and release | Planned |
 
-The server has 27 read-only tools, plus 4 write tools registered only with `--allow-write`. 151 unit tests and the end-to-end smoke test pass, with 95.7% line coverage.
+The server has 27 read-only tools, plus 6 write tools registered only with `--allow-write`. 163 unit tests and the end-to-end smoke test pass, with 95.7% line coverage.
 
 ## Design principles
 
@@ -51,6 +51,7 @@ src/
    ├─ worktrees.rs  list_worktrees
    ├─ write.rs      guards shared by write tools
    ├─ branches.rs   create_branch, delete_branch, rename_branch, create_tag
+   ├─ staging.rs    stage, unstage
    ├─ submodules.rs list_submodules
    ├─ config.rs     config_get
    ├─ objects.rs    count_objects
@@ -235,8 +236,8 @@ Shared guarantees for every tool in this phase:
 
 | Tool | Behaviour | gix | Notes |
 |---|---|---|---|
-| `stage` | `paths[]` / `all` → add to index (adds, modifications, deletions) | build an index from the status iterator, `write_blob`, `index.write()` | respect `.gitattributes` filters (`filter` pipeline) and executable bits |
-| `unstage` | `paths[]` → reset index entries to HEAD | rewrite entries from the HEAD tree | |
+| `stage` ✅ | `paths[]` / `all` → add to index (adds, modifications, deletions) | build an index from the status iterator, `write_blob`, `index.write()` | respect `.gitattributes` filters (`filter` pipeline) and executable bits |
+| `unstage` ✅ | `paths[]` → reset index entries to HEAD | rewrite entries from the HEAD tree | |
 | `commit` | `message`, `amend = false`, `allow_empty = false`, `author?` → new commit | `index.write_tree` + `repo.commit(...)` / `commit_as` | **gap:** hooks (`pre-commit`, `commit-msg`) and signing aren't run by gix. Either document this or optionally shell out to the hooks (opt-in `--run-hooks`) |
 | `create_branch` ✅ | `name`, `start_point = HEAD`, `force = false` | `edit_reference` with `MustNotExist` | name validated by `gix-validate` |
 | `delete_branch` ✅ | `name`, `force = false`; non-force refuses unmerged branches | `delete_local_branches_if_unchanged` | `destructive_hint`, `dry_run` default |
@@ -257,6 +258,15 @@ Shared guarantees for every tool in this phase:
 - **`create_branch`.** Reflog messages match git (`branch: Created from <start>`, `branch: Reset to <start>`); forcing over a checked-out branch is refused.
 - **`delete_branch`.** Uses gix's `delete_local_branches_if_unchanged`, which also removes `branch.<name>.*` config. The merged check follows `git branch -d`: the configured upstream when it exists locally, else HEAD. A dry run performs every check the real deletion does.
 - **`rename_branch`.** gix has no rename, so it's one ref transaction (create the new name, delete the old one, repoint HEAD when needed), with the reflog copied over first and the `branch.<name>` config section renamed under the config lock afterwards. Added `force` and `replaced`.
+- **`stage`.**
+  - Works from the index-to-worktree status, then hashes each file through gix's filter pipeline, so it matches `git add` (or `-A`) for adds, deletions, symlinks, the executable bit (`core.fileMode`), CRLF conversion, submodule commits and conflict resolution.
+  - Ignored files named explicitly and nested repositories are reported in `skipped`, rather than failing the call as `git add` does.
+  - Allowed during an in-progress operation, since that's how conflicts get resolved.
+- **`unstage`.**
+  - Takes `paths` or `all`. Restored entries get a zero stat, so git re-reads the file rather than trusting a stat that matched the replaced entry.
+  - Refused during an in-progress operation.
+- **Index writes.**
+  - gix's `File::write` takes the lock only when writing and keeps a stale cache-tree. `tools::write::update_index` locks before reading instead, and writes only the end-of-index-entry extension. A split index arrives merged with its shared index and is written back whole; a sparse index is refused.
 - **`create_tag`.** Added `force`; messages get git's whitespace cleanup. The result reuses `show_tag`'s shape. No reflog is written for tags, as in git.
 
 ---
@@ -326,6 +336,7 @@ gix has no sequencer, so this phase is where we build our own logic on its primi
 | Ignore matching only looks at the path itself (found in Phase 2) | `excludes()` → `at_entry()` reports no rule for `target/foo.rs` when `target/` is ignored; git ignores everything below an ignored directory | `tools/attributes.rs` (`deciding_rule`) checks each parent directory first, as git does |
 | Environment variables appear as configuration (found in Phase 2) | The config snapshot contains values gix derives from `GIT_EDITOR`, `HTTPS_PROXY` and others (some under `gitoxide.*` keys), which `git config --list` doesn't show | `config_get` leaves out `Source::EnvOverride` sections |
 | `key =` and a bare `key` look the same when iterating config (found in Phase 2) | The section iterator yields an empty value for both, but git reads the first as the empty string and the second as `true` | `config_get` asks `value_implicit` for empty values |
+| Index writes keep a stale cache-tree (found in Phase 3) | `gix_index::File::write` writes the `TREE` extension unchanged after entries change, so a later `git commit` could record outdated subtrees ([gitoxide#2421](https://github.com/GitoxideLabs/gitoxide/issues/2421)) | `update_index` writes only the end-of-index-entry extension; git rebuilds the rest |
 | Unified diff output differs from git (found in Phase 1) | gix's unified-diff helpers print `,1` ranges and no function context, and its default line input strips terminators, which loses `\ No newline at end of file` | Own hunk writer in `tools/diff.rs` on top of gix's line diff |
 
 ## Milestone summary
@@ -335,7 +346,7 @@ gix has no sequencer, so this phase is where we build our own logic on its primi
 | 0 Scaffold | 4 | — | ✅ done |
 | 1 Core read | 9 | ~4.9k lines including tests (planned ~2–3k) | ✅ done |
 | 2 Deep read | 14 | ~2k LOC | ✅ done |
-| 3 Safe writes | 10 | ~2–3k LOC (index writing and checkout safety are the hard parts) | 🚧 4 of 10 |
+| 3 Safe writes | 10 | ~2–3k LOC (index writing and checkout safety are the hard parts) | 🚧 6 of 10 |
 | 4 Rewriting | 8 | ~3–4k LOC (sequencer and stash) | planned |
 | 5 MCP extras | resources, prompts, progress, multi-repo | ~1.5k LOC | planned |
 | 6 Hardening | — | ongoing | planned |

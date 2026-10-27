@@ -13,7 +13,7 @@ Options:
 ```
 
 - `--repo` can point at the repository root, any directory inside its working tree, or a bare repository. The server serves exactly one repository per process. Tool path arguments are always relative to that repository's root, whichever directory you pass.
-- `--allow-write` registers the write tools (`create_branch`, `delete_branch`, `rename_branch`, `create_tag`; staging, committing and switching follow in Phase 3 of the [roadmap](../ROADMAP.md)). Without it they aren't listed at all, and the server can't change the repository. Write tools record a committer from `user.name` / `user.email` (or `GIT_COMMITTER_NAME` / `GIT_COMMITTER_EMAIL`) and refuse to run without one; `GIT_COMMITTER_DATE` pins the recorded time, as with git.
+- `--allow-write` registers the write tools (`create_branch`, `delete_branch`, `rename_branch`, `create_tag`, `stage`, `unstage`; committing and switching follow in Phase 3 of the [roadmap](../ROADMAP.md)). Without it they aren't listed at all, and the server can't change the repository. Write tools record a committer from `user.name` / `user.email` (or `GIT_COMMITTER_NAME` / `GIT_COMMITTER_EMAIL`) and refuse to run without one; `GIT_COMMITTER_DATE` pins the recorded time, as with git.
 
 The server speaks MCP over stdin and stdout, so it is started by an MCP client rather than run on its own.
 
@@ -35,7 +35,9 @@ The server reads the repository's git configuration (local, global and system) t
 | `diff.algorithm` | The line-diff algorithm for `diff` and `blame`. |
 | `core.autocrlf`, `.gitattributes` filters | How working-tree files are converted before `diff` compares them with the index, as `git diff` does. |
 | `.gitignore`, `.git/info/exclude`, `core.excludesFile` | What `status` treats as ignored, and the rules `check_ignore` reports. |
-| `.gitattributes`, `.git/info/attributes`, `core.attributesFile` | What `check_attr` reports. |
+| `.gitattributes`, `.git/info/attributes`, `core.attributesFile` | What `check_attr` reports, and the filters and line-ending conversion `stage` applies. |
+| `core.fileMode` | Whether `stage` records the executable bit from disk (`true`, the default) or keeps the index's (`false`). |
+| `core.autocrlf`, `core.safecrlf` | Line-ending conversion when `stage` hashes files, as with `git add`. |
 | `branch.<name>.remote` / `.merge`, `remote.<name>.fetch` | The `upstream` reported by `status`. |
 | `core.notesRef`, `notes.displayRef` | Which notes refs `notes` reads when no `ref` is given. |
 | `submodule.<name>.url` / `.branch` in `.git/config` | Override `.gitmodules` in `list_submodules`. |

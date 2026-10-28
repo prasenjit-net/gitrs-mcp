@@ -10,6 +10,7 @@ use super::{
     blame::{BlameArgs, blame},
     diff::{DiffFile, DiffResult, diff},
     history::{FileHistoryArgs, LogArgs, ShowCommitArgs, file_history, log, show_commit},
+    progress::Watch,
     resources::{diff_args, patch_args, render},
 };
 
@@ -76,7 +77,7 @@ fn recent_subjects(repo: &gix::Repository) -> anyhow::Result<Vec<String>> {
         skip: None,
         first_parent: true,
     };
-    Ok(log(repo, args)?
+    Ok(log(repo, args, &Watch::none())?
         .commits
         .into_iter()
         .map(|c| c.summary)
@@ -128,7 +129,7 @@ fn blame_notes(repo: &gix::Repository, changes: &DiffResult, rev: &str) -> anyho
                 limit: None,
             };
             // A path the diff saw may not exist at `rev` (staged on top of another commit); skip it.
-            let Ok(found) = blame(repo, args) else {
+            let Ok(found) = blame(repo, args, &Watch::none()) else {
                 continue;
             };
             for hunk in found.hunks {
@@ -186,6 +187,7 @@ pub fn explain_history(repo: &gix::Repository, args: HistoryArgs) -> anyhow::Res
             skip: None,
             follow_renames: true,
         },
+        &Watch::none(),
     )?;
     if history.commits.is_empty() {
         bail!(

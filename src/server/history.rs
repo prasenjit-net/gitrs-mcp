@@ -1,7 +1,9 @@
 //! Commit history.
 
 use rmcp::{
+    RoleServer,
     handler::server::wrapper::{Json, Parameters},
+    service::RequestContext,
     tool, tool_router,
 };
 
@@ -15,9 +17,9 @@ impl GitServer {
     async fn log(
         &self,
         Parameters(args): Parameters<tools::history::LogArgs>,
+        context: RequestContext<RoleServer>,
     ) -> Result<Json<tools::history::LogResult>, String> {
-        self.repo
-            .run(move |r| tools::history::log(r, args))
+        self.run_watched(context, move |r, w| tools::history::log(r, args, w))
             .await
             .map(Json)
     }
@@ -41,11 +43,13 @@ impl GitServer {
     async fn file_history(
         &self,
         Parameters(args): Parameters<tools::history::FileHistoryArgs>,
+        context: RequestContext<RoleServer>,
     ) -> Result<Json<tools::history::FileHistoryResult>, String> {
-        self.repo
-            .run(move |r| tools::history::file_history(r, args))
-            .await
-            .map(Json)
+        self.run_watched(context, move |r, w| {
+            tools::history::file_history(r, args, w)
+        })
+        .await
+        .map(Json)
     }
 
     /// Find commits by message regex, author regex, committer date window (`since`/`until`) and
@@ -54,11 +58,13 @@ impl GitServer {
     async fn search_commits(
         &self,
         Parameters(args): Parameters<tools::history::SearchCommitsArgs>,
+        context: RequestContext<RoleServer>,
     ) -> Result<Json<tools::history::SearchCommitsResult>, String> {
-        self.repo
-            .run(move |r| tools::history::search_commits(r, args))
-            .await
-            .map(Json)
+        self.run_watched(context, move |r, w| {
+            tools::history::search_commits(r, args, w)
+        })
+        .await
+        .map(Json)
     }
 
     /// Notes attached to a commit (default HEAD) or other object, like `git notes show`. Reads

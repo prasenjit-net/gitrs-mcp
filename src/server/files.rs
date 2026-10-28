@@ -1,7 +1,9 @@
 //! File contents and line history.
 
 use rmcp::{
+    RoleServer,
     handler::server::wrapper::{Json, Parameters},
+    service::RequestContext,
     tool, tool_router,
 };
 
@@ -45,9 +47,9 @@ impl GitServer {
     async fn blame(
         &self,
         Parameters(args): Parameters<tools::blame::BlameArgs>,
+        context: RequestContext<RoleServer>,
     ) -> Result<Json<tools::blame::BlameResult>, String> {
-        self.repo
-            .run(move |r| tools::blame::blame(r, args))
+        self.run_watched(context, move |r, w| tools::blame::blame(r, args, w))
             .await
             .map(Json)
     }
@@ -60,9 +62,9 @@ impl GitServer {
     async fn grep(
         &self,
         Parameters(args): Parameters<tools::grep::GrepArgs>,
+        context: RequestContext<RoleServer>,
     ) -> Result<Json<tools::grep::GrepResult>, String> {
-        self.repo
-            .run(move |r| tools::grep::grep(r, args))
+        self.run_watched(context, move |r, w| tools::grep::grep(r, args, w))
             .await
             .map(Json)
     }

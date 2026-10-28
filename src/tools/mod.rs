@@ -19,6 +19,7 @@ pub mod integrate;
 pub mod merge;
 pub mod notes;
 pub mod objects;
+pub mod progress;
 pub mod prompts;
 pub mod rebase;
 pub mod reflog;
@@ -408,6 +409,36 @@ pub fn short_hex(id: &gix::oid) -> String {
 #[cfg(test)]
 pub(crate) mod testutil {
     use std::{path::Path, process::Command};
+
+    /// Progress reports a [`Watch`](super::progress::Watch) receives, in order.
+    pub type Reports = std::sync::Arc<std::sync::Mutex<Vec<super::progress::Progress>>>;
+
+    /// A watch that records every report (`interval` apart at least) and is cancelled by setting the
+    /// returned flag.
+    pub fn recording_watch(
+        interval: std::time::Duration,
+    ) -> (
+        super::progress::Watch,
+        std::sync::Arc<std::sync::atomic::AtomicBool>,
+        Reports,
+    ) {
+        let cancelled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let seen = Reports::default();
+        let sink = seen.clone();
+        let watch = super::progress::Watch::new(
+            cancelled.clone(),
+            interval,
+            Some(move |p| sink.lock().unwrap().push(p)),
+        );
+        (watch, cancelled, seen)
+    }
+
+    /// A watch whose request was already cancelled.
+    pub fn cancelled_watch() -> super::progress::Watch {
+        let (watch, cancelled, _) = recording_watch(std::time::Duration::ZERO);
+        cancelled.store(true, std::sync::atomic::Ordering::Relaxed);
+        watch
+    }
 
     /// Build a throwaway repo with the system `git`, which doubles as an oracle
     /// for gix behaving like real git.

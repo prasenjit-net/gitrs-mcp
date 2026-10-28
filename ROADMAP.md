@@ -13,7 +13,7 @@ _Last updated 2026-10-27._
 | 2 Deep read and inspection | ✅ Done: 14 tools, each checked against the git CLI |
 | 3 Safe writes | ✅ Done: 10 tools behind `--allow-write`, each checked against the git CLI |
 | 4 History rewriting | ✅ Done: 12 tools behind `--allow-write`, each checked against the git CLI, with git and gitrs-mcp able to continue each other's operations |
-| 5 MCP-native extras | 🚧 In progress: resources, completion and prompts are done |
+| 5 MCP-native extras | 🚧 In progress: resources, completion, prompts, progress and cancellation are done |
 | 6 Hardening and release | Planned |
 
 The server has 27 read-only tools, plus 22 write tools registered only with `--allow-write`. 220 unit tests and the end-to-end smoke test pass, with 96.2% line coverage.
@@ -351,7 +351,7 @@ gix has no sequencer, so this phase is where we build our own logic on its primi
   - `write_commit_message`: fills in the staged diff.
   - `review_changes`: diff plus surrounding blame.
   - `explain_history`: file history for a path.
-- **Progress notifications** for long operations (`blame` on big files, `grep`, large `log`). Honour cancellation via `gix::interrupt` / `should_interrupt` flags.
+- **Progress notifications** ✅ for long operations (`blame` on big files, `grep`, large `log`). Honour cancellation via `gix::interrupt` / `should_interrupt` flags.
 - **Change notifications.** Watch `.git/HEAD`, refs and the index, and emit `notifications/resources/updated`. This is optional behind `--watch`.
 - **Multi-repo.**
   - Accept multiple `--repo` values, or use MCP `roots` from the client.
@@ -373,6 +373,12 @@ gix has no sequencer, so this phase is where we build our own logic on its primi
   - `review_changes` takes `from`/`to` with the diff resource's pairs (default the staged changes). "Surrounding blame" became the blame of each hunk's old lines, context included, at `from`, or at HEAD for `index..worktree`. Pure additions have nothing to blame and are skipped.
   - `explain_history` follows renames and includes the full message and patch of the 10 most recent commits, within a 128 KiB patch budget.
   - Found while testing: `gitrs://diff/HEAD..index` failed before the first commit. HEAD now goes to the diff tool's default, which treats an unborn HEAD as the empty tree.
+- **Progress and cancellation.**
+  - `log`, `search_commits`, `file_history` and `grep` report progress and stop on cancellation, through a `tools::progress::Watch` that wraps their iterators. `search_commits` counts commits scanned, not matches, since a selective filter can scan far more than it returns.
+  - Cancellation uses our own `AtomicBool`, set when the request is cancelled, rather than `gix::interrupt`. The process-wide interrupt would cancel every concurrent call, and the walks are our own loops anyway.
+  - `blame` only reports when it starts: gix's `blame_file` has no progress or interrupt hook, so a cancelled blame stops only once it returns.
+  - Reports are throttled to one every 250 ms, so quick calls send none. All notifications are sent before the result.
+  - The tool functions gained a `watch: &Watch` parameter. Other callers, such as the prompts, pass `Watch::none()`.
 - **Completion.** Prompt arguments complete too: `rev`, `from` and `to` complete from `HEAD` and ref short names, plus `index`/`worktree` where they're valid. `path` completes one directory level at a time against the context revision. Completion errors give no values, since a half-typed context revision is normal.
 
 ---

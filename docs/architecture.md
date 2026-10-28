@@ -75,6 +75,15 @@ client ──tools/call──▶ rmcp ──Args──▶ server wrapper ──c
 client ◀──result───── rmcp ◀──Json<Out> / Err(String)────── tools::<area>::<tool>(&repo, args)
 ```
 
+### Progress and cancellation
+
+Long walks get a `tools::progress::Watch`, so the tool layer can report progress and notice cancellation without knowing about MCP. For `log`, `search_commits`, `file_history`, `grep` and `blame`, the wrapper calls `GitServer::run_watched` (in `server/progress.rs`) instead of `RepoHandle::run`. That builds the watch from the request:
+
+- A small task waits on the request's cancellation token and sets the watch's `AtomicBool` when the client sends `notifications/cancelled`. Tools wrap their commit or file iterator in `Watch::track`, which checks the flag on every item and ends the walk with an error. rmcp drops the response of a cancelled request, so the error only stops the work.
+- If the request has a progress token, reports go through a channel to a task that sends `notifications/progress`, at most one every 250 ms. `run_watched` waits for that task to drain before returning, so every notification reaches the client before the result.
+
+Other callers, such as the prompts, pass `Watch::none()`.
+
 ## The sync/async bridge
 
 gix is synchronous and `gix::Repository` is not `Sync`, while rmcp handlers are async. `RepoHandle` holds a `gix::ThreadSafeRepository`, which is cheap to clone and can be shared between threads. For each call it clones the handle into a `spawn_blocking` task and turns it into a thread-local `Repository` there. Long Git operations therefore never block the async runtime, and concurrent calls each get their own repository instance with its own object caches.

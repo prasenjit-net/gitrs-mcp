@@ -12,7 +12,9 @@ use serde::{Deserialize, Serialize};
 use super::{
     clip_utf8,
     files::{list_children, worktree_path},
-    is_binary, page_limit, paginate, pathspec_search, resolve_object,
+    is_binary, page_limit, paginate, pathspec_search,
+    progress::Watch,
+    resolve_object,
 };
 
 const DEFAULT_GREP_LIMIT: usize = 100;
@@ -85,8 +87,9 @@ enum Content {
 /// Lines matching a regex in tracked files, like `git grep -n --column -I`.
 ///
 /// Like git, it skips binary files, symlinks, submodules and untracked files, and in the
-/// worktree, tracked files that were deleted.
-pub fn grep(repo: &gix::Repository, args: GrepArgs) -> anyhow::Result<GrepResult> {
+/// worktree, tracked files that were deleted. Reports files searched to `watch` and stops when it's
+/// cancelled.
+pub fn grep(repo: &gix::Repository, args: GrepArgs, watch: &Watch) -> anyhow::Result<GrepResult> {
     let regex = build_regex(&args)?;
     let index = repo.index_or_empty()?;
     let mut spec = pathspec_search(repo, &args.pathspec, &index)?;
@@ -96,11 +99,15 @@ pub fn grep(repo: &gix::Repository, args: GrepArgs) -> anyhow::Result<GrepResult
             .is_none_or(|s| s.is_included(c.path.as_bstr(), Some(false)))
     });
 
-    let matches = candidates.iter().flat_map(|candidate| {
-        search(repo, candidate, &regex).map_or_else(
-            |err| vec![Err(err)],
-            |found| found.into_iter().map(Ok).collect(),
-        )
+    let total = u64::try_from(candidates.len()).ok();
+    let searched = watch.track(candidates.iter().map(Ok), total, "files searched");
+    let matches = searched.flat_map(|candidate| {
+        candidate
+            .and_then(|candidate| search(repo, candidate, &regex))
+            .map_or_else(
+                |err| vec![Err(err)],
+                |found| found.into_iter().map(Ok).collect(),
+            )
     });
     let limit = page_limit(args.limit, DEFAULT_GREP_LIMIT, MAX_GREP_LIMIT);
     let (matches, truncated) = paginate(matches, args.skip.unwrap_or(0), limit)?;
@@ -317,7 +324,7 @@ mod tests {
         // Unstaged edits are searched; untracked files are not.
         write(root, "a.txt", "one\ntwo\nthree one\n");
         write(root, "untracked.txt", "one\n");
-        let res = grep(&repo, args("one", None)).unwrap();
+        let res = grep(&repo, args("one", None), &Watch::none()).unwrap();
         assert_eq!(rows(&res, ""), git_grep(root, &["-e", "one"]));
         assert_eq!(res.matches.len(), 6, "{:?}", rows(&res, ""));
         assert!(res.rev.is_none() && !res.truncated);
@@ -336,16 +343,16 @@ mod tests {
         run_git(root, &["add", "a.txt"]);
         write(root, "a.txt", "worktree only\n");
 
-        let head = grep(&repo, args("one", Some("HEAD"))).unwrap();
+        let head = grep(&repo, args("one", Some("HEAD")), &Watch::none()).unwrap();
         assert_eq!(rows(&head, "HEAD:"), git_grep(root, &["-e", "one", "HEAD"]));
         assert_eq!(
             head.rev.as_deref(),
             Some(git_stdout(root, &["rev-parse", "HEAD"]).trim())
         );
-        let old = grep(&repo, args("t", Some("v1"))).unwrap();
+        let old = grep(&repo, args("t", Some("v1")), &Watch::none()).unwrap();
         assert_eq!(rows(&old, "v1:"), git_grep(root, &["-e", "t", "v1"]));
 
-        let index = grep(&repo, args("one", Some("index"))).unwrap();
+        let index = grep(&repo, args("one", Some("index")), &Watch::none()).unwrap();
         assert_eq!(rows(&index, ""), git_grep(root, &["--cached", "-e", "one"]));
         assert_eq!(index.matches[0].text, "staged one");
     }
@@ -357,32 +364,32 @@ mod tests {
         let mut a = args("ONE", None);
         a.ignore_case = true;
         assert_eq!(
-            rows(&grep(&repo, a).unwrap(), ""),
+            rows(&grep(&repo, a, &Watch::none()).unwrap(), ""),
             git_grep(root, &["-i", "-e", "ONE"])
         );
 
         let mut a = args("fn .*\\(", None);
         a.pathspec = vec!["src/".into()];
         assert_eq!(
-            rows(&grep(&repo, a).unwrap(), ""),
+            rows(&grep(&repo, a, &Watch::none()).unwrap(), ""),
             git_grep(root, &["-E", "-e", "fn .*\\(", "--", "src/"])
         );
 
         let mut a = args("one", None);
         a.pathspec = vec!["*.txt".into(), ":(exclude)dïr".into()];
         assert_eq!(
-            rows(&grep(&repo, a).unwrap(), ""),
+            rows(&grep(&repo, a, &Watch::none()).unwrap(), ""),
             git_grep(root, &["-e", "one", "--", "*.txt", ":(exclude)dïr"])
         );
 
         let mut a = args("{}", None);
         assert!(
-            grep(&repo, args("{", None)).is_err(),
+            grep(&repo, args("{", None), &Watch::none()).is_err(),
             "unbalanced brace is not a valid regex"
         );
         a.fixed_strings = true;
         assert_eq!(
-            rows(&grep(&repo, a).unwrap(), ""),
+            rows(&grep(&repo, a, &Watch::none()).unwrap(), ""),
             git_grep(root, &["-F", "-e", "{}"])
         );
     }
@@ -390,17 +397,19 @@ mod tests {
     #[test]
     fn paginates_matches() {
         let (_dir, repo) = grep_fixture();
-        let all = grep(&repo, args("one", None)).unwrap().matches;
+        let all = grep(&repo, args("one", None), &Watch::none())
+            .unwrap()
+            .matches;
         let mut a = args("one", None);
         a.limit = Some(2);
         a.skip = Some(1);
-        let page = grep(&repo, a).unwrap();
+        let page = grep(&repo, a, &Watch::none()).unwrap();
         assert_eq!(page.matches.len(), 2);
         assert_eq!(page.matches[0].path, all[1].path);
         assert!(page.truncated);
         let mut a = args("one", None);
         a.skip = Some(all.len() - 1);
-        let last = grep(&repo, a).unwrap();
+        let last = grep(&repo, a, &Watch::none()).unwrap();
         assert_eq!(last.matches.len(), 1);
         assert!(!last.truncated);
     }
@@ -415,7 +424,7 @@ mod tests {
         );
         let repo = open(dir.path());
         run_git(dir.path(), &["add", "."]);
-        let res = grep(&repo, args("needle", None)).unwrap();
+        let res = grep(&repo, args("needle", None), &Watch::none()).unwrap();
         let m = &res.matches[0];
         assert!(m.text_truncated);
         assert!(m.text.len() <= MAX_LINE_BYTES);
@@ -437,42 +446,61 @@ mod tests {
             &["merge", "-q", "feature"]
         ));
         let repo = open(root);
-        let res = grep(&repo, args("one|ours|theirs", None)).unwrap();
+        let res = grep(&repo, args("one|ours|theirs", None), &Watch::none()).unwrap();
         assert_eq!(
             rows(&res, ""),
             git_grep(root, &["-E", "-e", "one|ours|theirs"])
         );
 
         std::fs::remove_file(root.join("a.txt")).unwrap();
-        assert!(grep(&repo, args("one", None)).unwrap().matches.is_empty());
+        assert!(
+            grep(&repo, args("one", None), &Watch::none())
+                .unwrap()
+                .matches
+                .is_empty()
+        );
     }
 
     #[test]
     fn bare_empty_and_bad_revisions() {
         let (_dir, bare) = bare_repo();
-        let res = grep(&bare, args("two", None)).unwrap();
+        let res = grep(&bare, args("two", None), &Watch::none()).unwrap();
         assert_eq!(res.matches.len(), 1, "bare repositories search HEAD");
         assert!(res.rev.is_some());
         let err = format!(
             "{:#}",
-            grep(&bare, args("two", Some("worktree"))).unwrap_err()
+            grep(&bare, args("two", Some("worktree")), &Watch::none()).unwrap_err()
         );
         assert!(err.contains("bare"), "{err}");
 
         let (_dir, empty) = empty_repo();
-        assert!(grep(&empty, args("x", None)).unwrap().matches.is_empty());
-        let err = format!("{:#}", grep(&empty, args("x", Some("HEAD"))).unwrap_err());
+        assert!(
+            grep(&empty, args("x", None), &Watch::none())
+                .unwrap()
+                .matches
+                .is_empty()
+        );
+        let err = format!(
+            "{:#}",
+            grep(&empty, args("x", Some("HEAD")), &Watch::none()).unwrap_err()
+        );
         assert!(err.contains("no commits yet"), "{err}");
 
         let (_dir, repo) = fixture_repo();
-        let err = format!("{:#}", grep(&repo, args("x", Some("nope"))).unwrap_err());
+        let err = format!(
+            "{:#}",
+            grep(&repo, args("x", Some("nope")), &Watch::none()).unwrap_err()
+        );
         assert!(err.contains("cannot resolve `nope`"), "{err}");
         let err = format!(
             "{:#}",
-            grep(&repo, args("x", Some("HEAD:a.txt"))).unwrap_err()
+            grep(&repo, args("x", Some("HEAD:a.txt")), &Watch::none()).unwrap_err()
         );
         assert!(err.contains("doesn't name a commit or tree"), "{err}");
-        let err = format!("{:#}", grep(&repo, args("(", None)).unwrap_err());
+        let err = format!(
+            "{:#}",
+            grep(&repo, args("(", None), &Watch::none()).unwrap_err()
+        );
         assert!(err.contains("fixed_strings"), "{err}");
     }
 
@@ -481,5 +509,25 @@ mod tests {
         let parsed: GrepArgs = serde_json::from_str(r#"{"pattern":"x"}"#).unwrap();
         assert!(parsed.rev.is_none() && parsed.pathspec.is_empty());
         assert!(!parsed.ignore_case && !parsed.fixed_strings);
+    }
+
+    #[test]
+    fn grep_reports_files_searched_and_stops_when_cancelled() {
+        let (dir, repo) = fixture_repo();
+        write(dir.path(), "b.txt", "two\n");
+        run_git(dir.path(), &["add", "b.txt"]);
+        let (watch, _, seen) = crate::tools::testutil::recording_watch(std::time::Duration::ZERO);
+        grep(&repo, args("two", None), &watch).unwrap();
+        let tracked = git_stdout(dir.path(), &["ls-files"]).lines().count() as u64;
+        let last = seen.lock().unwrap().last().cloned().unwrap();
+        assert_eq!((last.done, last.total), (tracked, Some(tracked)));
+        assert_eq!(
+            last.message,
+            format!("{tracked} of {tracked} files searched")
+        );
+
+        let watch = crate::tools::testutil::cancelled_watch();
+        let err = grep(&repo, args("two", None), &watch).unwrap_err();
+        assert!(err.to_string().contains("cancelled"));
     }
 }

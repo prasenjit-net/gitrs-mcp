@@ -5,7 +5,11 @@ use gix::bstr::{BStr, ByteSlice};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::{Signature, page_limit, repo_file_path, resolve_commit};
+use super::{
+    Signature, page_limit,
+    progress::{Progress, Watch},
+    repo_file_path, resolve_commit,
+};
 
 const DEFAULT_BLAME_LIMIT: usize = 200;
 const MAX_BLAME_LIMIT: usize = 2000;
@@ -55,8 +59,14 @@ pub struct BlameResult {
     pub truncated: bool,
 }
 
-/// Which commit last touched each line of a file, following renames like `git blame`.
-pub fn blame(repo: &gix::Repository, args: BlameArgs) -> anyhow::Result<BlameResult> {
+/// Which commit last touched each line of a file, following renames like `git blame`. Tells `watch`
+/// when it starts; gix's blame can't be interrupted, so cancellation is only noticed before it starts
+/// and once it returns.
+pub fn blame(
+    repo: &gix::Repository,
+    args: BlameArgs,
+    watch: &Watch,
+) -> anyhow::Result<BlameResult> {
     let path = repo_file_path(&args.path)?;
     let rev_name = args.rev.as_deref().unwrap_or("HEAD");
     let commit = resolve_commit(repo, args.rev.as_deref())?;
@@ -78,7 +88,14 @@ pub fn blame(repo: &gix::Repository, args: BlameArgs) -> anyhow::Result<BlameRes
         rewrites: Some(Default::default()),
         ..Default::default()
     };
+    watch.check()?;
+    watch.report(Progress {
+        done: 0,
+        total: None,
+        message: format!("blaming {path} ({line_count} lines)"),
+    });
     let outcome = repo.blame_file(path.as_ref(), commit.id, options)?;
+    watch.check()?;
 
     let limit = page_limit(args.limit, DEFAULT_BLAME_LIMIT, MAX_BLAME_LIMIT);
     let mut commits = HashMap::new();
@@ -199,7 +216,7 @@ mod tests {
     #[test]
     fn matches_git_blame_across_renames() {
         let (dir, repo) = blame_fixture();
-        let res = blame(&repo, args("tale.txt")).unwrap();
+        let res = blame(&repo, args("tale.txt"), &Watch::none()).unwrap();
         assert_eq!(per_line(&res), git_blame(dir.path(), &["tale.txt"]));
         assert_eq!(res.line_count, 6);
         assert!(!res.truncated);
@@ -215,7 +232,7 @@ mod tests {
         let (dir, repo) = blame_fixture();
         let mut a = args("tale.txt");
         a.line_range = Some([2, 3]);
-        let res = blame(&repo, a).unwrap();
+        let res = blame(&repo, a, &Watch::none()).unwrap();
         assert_eq!(
             per_line(&res),
             git_blame(dir.path(), &["-L", "2,3", "tale.txt"])
@@ -223,7 +240,7 @@ mod tests {
 
         let mut a = args("story.txt");
         a.rev = Some("HEAD~2".into());
-        let res = blame(&repo, a).unwrap();
+        let res = blame(&repo, a, &Watch::none()).unwrap();
         assert_eq!(
             per_line(&res),
             git_blame(dir.path(), &["HEAD~2", "--", "story.txt"])
@@ -239,7 +256,7 @@ mod tests {
         let (_dir, repo) = blame_fixture();
         let mut a = args("tale.txt");
         a.limit = Some(1);
-        let res = blame(&repo, a).unwrap();
+        let res = blame(&repo, a, &Watch::none()).unwrap();
         assert_eq!(res.hunks.len(), 1);
         assert!(res.truncated);
     }
@@ -247,7 +264,7 @@ mod tests {
     #[test]
     fn errors_are_actionable() {
         let (_dir, repo) = blame_fixture();
-        let msg = |a: BlameArgs| format!("{:#}", blame(&repo, a).unwrap_err());
+        let msg = |a: BlameArgs| format!("{:#}", blame(&repo, a, &Watch::none()).unwrap_err());
         assert!(msg(args("missing.txt")).contains("does not exist"));
         let mut a = args("tale.txt");
         a.line_range = Some([5, 99]);
@@ -263,10 +280,27 @@ mod tests {
         write(dir.path(), "dir/x.txt", "x\n");
         run_git(dir.path(), &["add", "."]);
         run_git(dir.path(), &["commit", "-q", "-m", "dir"]);
-        let err = format!("{:#}", blame(&open(dir.path()), args("dir")).unwrap_err());
+        let err = format!(
+            "{:#}",
+            blame(&open(dir.path()), args("dir"), &Watch::none()).unwrap_err()
+        );
         assert!(err.contains("not a file"), "{err}");
 
         let (_dir, empty) = empty_repo();
-        assert!(blame(&empty, args("a.txt")).is_err());
+        assert!(blame(&empty, args("a.txt"), &Watch::none()).is_err());
+    }
+
+    #[test]
+    fn blame_announces_itself_and_honours_cancellation() {
+        let (_dir, repo) = fixture_repo();
+        let (watch, _, seen) = crate::tools::testutil::recording_watch(std::time::Duration::ZERO);
+        blame(&repo, args("a.txt"), &watch).unwrap();
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].message, "blaming a.txt (2 lines)");
+
+        let watch = crate::tools::testutil::cancelled_watch();
+        let err = blame(&repo, args("a.txt"), &watch).unwrap_err();
+        assert!(err.to_string().contains("cancelled"));
     }
 }

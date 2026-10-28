@@ -7,6 +7,7 @@
 mod changes;
 mod files;
 mod history;
+mod progress;
 mod prompts;
 mod repo;
 mod resources;
@@ -168,6 +169,15 @@ mod tests {
         path: &std::path::Path,
         allow_write: bool,
     ) -> rmcp::service::RunningService<rmcp::RoleClient, ()> {
+        connect_with(path, allow_write, ()).await
+    }
+
+    /// Like [`connect`], with `handler` receiving the server's notifications.
+    pub(crate) async fn connect_with<C: rmcp::ClientHandler>(
+        path: &std::path::Path,
+        allow_write: bool,
+        handler: C,
+    ) -> rmcp::service::RunningService<rmcp::RoleClient, C> {
         use rmcp::ServiceExt;
         let (server_side, client_side) = tokio::io::duplex(1 << 16);
         let server = server(path, allow_write);
@@ -176,7 +186,54 @@ mod tests {
             running.waiting().await?;
             anyhow::Ok(())
         });
-        ().serve(client_side).await.expect("client connects")
+        handler.serve(client_side).await.expect("client connects")
+    }
+
+    /// A client that records the progress notifications it receives.
+    #[derive(Clone, Default)]
+    struct ProgressRecorder(
+        std::sync::Arc<std::sync::Mutex<Vec<rmcp::model::ProgressNotificationParam>>>,
+    );
+
+    impl rmcp::ClientHandler for ProgressRecorder {
+        async fn on_progress(
+            &self,
+            params: rmcp::model::ProgressNotificationParam,
+            _context: rmcp::service::NotificationContext<rmcp::RoleClient>,
+        ) {
+            self.0.lock().unwrap().push(params);
+        }
+    }
+
+    #[tokio::test]
+    async fn long_tools_send_progress_for_a_progress_token() {
+        use rmcp::model::{CallToolRequestParams, ClientRequest, Request};
+        let (dir, _) = fixture_repo();
+        let recorder = ProgressRecorder::default();
+        let client = connect_with(dir.path(), false, recorder.clone()).await;
+        let mut arguments = serde_json::Map::new();
+        arguments.insert("path".into(), "a.txt".into());
+        let call = ClientRequest::CallToolRequest(Request::new(
+            CallToolRequestParams::new("blame").with_arguments(arguments),
+        ));
+        let handle = client
+            .send_cancellable_request(call, rmcp::service::PeerRequestOptions::no_options())
+            .await
+            .unwrap();
+        let token = handle.progress_token.clone();
+        handle.await_response().await.unwrap();
+        // Notifications are sent before the response, but handled on their own task.
+        for _ in 0..100 {
+            if !recorder.0.lock().unwrap().is_empty() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        let seen = recorder.0.lock().unwrap().clone();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].progress_token, token);
+        assert_eq!(seen[0].message.as_deref(), Some("blaming a.txt (2 lines)"));
+        client.cancel().await.unwrap();
     }
 
     #[tokio::test]

@@ -15,8 +15,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    ChangeKind, LogEntry, Signature, page_limit, paginate, repo_file_path, repo_path,
-    resolve_commit,
+    ChangeKind, LogEntry, Signature, page_limit, paginate, progress::Watch, repo_file_path,
+    repo_path, resolve_commit,
 };
 
 const DEFAULT_LOG_LIMIT: usize = 20;
@@ -43,7 +43,9 @@ pub struct LogResult {
     pub truncated: bool,
 }
 
-pub fn log(repo: &gix::Repository, args: LogArgs) -> anyhow::Result<LogResult> {
+/// Commits reachable from `rev`, newest first, like `git log`. Reports commits walked to `watch` and
+/// stops when it's cancelled.
+pub fn log(repo: &gix::Repository, args: LogArgs, watch: &Watch) -> anyhow::Result<LogResult> {
     let tip = resolve_commit(repo, args.rev.as_deref())?.id;
     let limit = page_limit(args.limit, DEFAULT_LOG_LIMIT, MAX_LOG_LIMIT);
 
@@ -51,8 +53,9 @@ pub fn log(repo: &gix::Repository, args: LogArgs) -> anyhow::Result<LogResult> {
     if args.first_parent {
         walk = walk.first_parent_only();
     }
-    let entries = walk
-        .all()?
+    let walked = walk.all()?.map(|info| Ok(info?));
+    let entries = watch
+        .track(walked, None, "commits walked")
         .map(|info| LogEntry::from_commit(&info?.object()?));
     let (commits, truncated) = paginate(entries, args.skip.unwrap_or(0), limit)?;
     Ok(LogResult { commits, truncated })
@@ -132,10 +135,12 @@ pub struct FileHistoryResult {
     pub truncated: bool,
 }
 
-/// Commits that changed `path`, newest first, matching `git log -- <path>` (or `--follow`).
+/// Commits that changed `path`, newest first, matching `git log -- <path>` (or `--follow`). Reports the
+/// commits found to `watch` and stops when it's cancelled.
 pub fn file_history(
     repo: &gix::Repository,
     args: FileHistoryArgs,
+    watch: &Watch,
 ) -> anyhow::Result<FileHistoryResult> {
     let path = repo_file_path(&args.path)?;
     let tip = resolve_commit(repo, args.rev.as_deref())?;
@@ -146,7 +151,7 @@ pub fn file_history(
     }
     let limit = page_limit(args.limit, DEFAULT_LOG_LIMIT, MAX_LOG_LIMIT);
     let walk = PathHistory::new(repo, &tip, path, args.follow_renames, None)?;
-    let entries = walk.map(|step| {
+    let entries = watch.track(walk, None, "commits found").map(|step| {
         let step = step?;
         Ok(FileHistoryEntry {
             commit: LogEntry::from_commit(&step.commit)?,
@@ -189,10 +194,12 @@ pub struct SearchCommitsResult {
     pub truncated: bool,
 }
 
-/// Commits reachable from `rev` that match every given filter.
+/// Commits reachable from `rev` that match every given filter. Reports commits scanned to `watch` and
+/// stops when it's cancelled.
 pub fn search_commits(
     repo: &gix::Repository,
     args: SearchCommitsArgs,
+    watch: &Watch,
 ) -> anyhow::Result<SearchCommitsResult> {
     let filter = CommitFilter::new(&args)?;
     let tip = resolve_commit(repo, args.rev.as_deref())?;
@@ -217,7 +224,8 @@ pub fn search_commits(
             Box::new(walk.all()?.map(|info| Ok(info?.object()?)))
         }
     };
-    let entries = candidates.filter_map(|commit| {
+    let scanned = watch.track(candidates, None, "commits scanned");
+    let entries = scanned.filter_map(|commit| {
         let step = || -> anyhow::Result<Option<LogEntry>> {
             let commit = commit?;
             Ok(if filter.matches(&commit)? {
@@ -522,7 +530,7 @@ mod tests {
     #[test]
     fn log_is_newest_first() {
         let (_dir, repo) = fixture_repo();
-        let res = log(&repo, log_args(None, None)).unwrap();
+        let res = log(&repo, log_args(None, None), &Watch::none()).unwrap();
         let summaries: Vec<_> = res.commits.iter().map(|c| c.summary.as_str()).collect();
         assert_eq!(summaries, ["second commit", "first commit"]);
         assert!(!res.truncated);
@@ -532,10 +540,10 @@ mod tests {
     #[test]
     fn log_paginates() {
         let (_dir, repo) = fixture_repo();
-        let page = log(&repo, log_args(Some(1), None)).unwrap();
+        let page = log(&repo, log_args(Some(1), None), &Watch::none()).unwrap();
         assert_eq!(page.commits.len(), 1);
         assert!(page.truncated);
-        let next = log(&repo, log_args(Some(1), Some(1))).unwrap();
+        let next = log(&repo, log_args(Some(1), Some(1)), &Watch::none()).unwrap();
         assert_eq!(next.commits[0].summary, "first commit");
         assert!(!next.truncated);
     }
@@ -545,7 +553,7 @@ mod tests {
         let (dir, repo) = history_fixture();
         let mut args = log_args(None, None);
         args.first_parent = true;
-        let res = log(&repo, args).unwrap();
+        let res = log(&repo, args, &Watch::none()).unwrap();
         assert_eq!(
             ids(&res.commits),
             git_ids(dir.path(), &["--first-parent", "--topo-order"])
@@ -555,7 +563,10 @@ mod tests {
     #[test]
     fn log_on_empty_repo_explains() {
         let (_dir, repo) = empty_repo();
-        let err = format!("{:#}", log(&repo, log_args(None, None)).unwrap_err());
+        let err = format!(
+            "{:#}",
+            log(&repo, log_args(None, None), &Watch::none()).unwrap_err()
+        );
         assert!(err.contains("no commits yet"), "{err}");
     }
 
@@ -599,7 +610,7 @@ mod tests {
             "docs/readme.md",
             "src/feature.rs",
         ] {
-            let res = file_history(&repo, history_args(path)).unwrap();
+            let res = file_history(&repo, history_args(path), &Watch::none()).unwrap();
             let ours: Vec<_> = res.commits.iter().map(|c| c.commit.id.clone()).collect();
             assert_eq!(ours, git_ids(dir.path(), &["--", path]), "{path}");
         }
@@ -614,10 +625,10 @@ mod tests {
         run_git(root, &["commit", "-q", "-m", "add tmp"]);
         run_git(root, &["rm", "-q", "tmp.txt"]);
         run_git(root, &["commit", "-q", "-m", "drop tmp"]);
-        let res = file_history(&open(root), history_args("tmp.txt")).unwrap();
+        let res = file_history(&open(root), history_args("tmp.txt"), &Watch::none()).unwrap();
         let changes: Vec<_> = res.commits.iter().map(|c| c.change).collect();
         assert_eq!(changes, [ChangeKind::Deleted, ChangeKind::Added]);
-        let res = file_history(&open(root), history_args("a.txt")).unwrap();
+        let res = file_history(&open(root), history_args("a.txt"), &Watch::none()).unwrap();
         let changes: Vec<_> = res.commits.iter().map(|c| c.change).collect();
         assert_eq!(changes, [ChangeKind::Modified, ChangeKind::Added]);
     }
@@ -632,7 +643,7 @@ mod tests {
         run_git(root, &["commit", "-q", "-am", "edit moved"]);
 
         let repo = open(root);
-        let plain = file_history(&repo, history_args("moved.txt")).unwrap();
+        let plain = file_history(&repo, history_args("moved.txt"), &Watch::none()).unwrap();
         assert_eq!(
             plain.commits.len(),
             2,
@@ -642,7 +653,7 @@ mod tests {
 
         let mut args = history_args("moved.txt");
         args.follow_renames = true;
-        let res = file_history(&repo, args).unwrap();
+        let res = file_history(&repo, args, &Watch::none()).unwrap();
         let ours: Vec<_> = res.commits.iter().map(|c| c.commit.id.clone()).collect();
         assert_eq!(ours, git_ids(root, &["--follow", "--", "moved.txt"]));
         let rename = &res.commits[1];
@@ -662,21 +673,24 @@ mod tests {
         );
         let mut args = history_args("src");
         args.limit = Some(1);
-        let first = file_history(&repo, args).unwrap();
+        let first = file_history(&repo, args, &Watch::none()).unwrap();
         assert!(first.truncated);
         assert_eq!(first.commits[0].commit.id, all[0]);
         let mut args = history_args("src");
         args.skip = Some(1);
-        let rest = file_history(&repo, args).unwrap();
+        let rest = file_history(&repo, args, &Watch::none()).unwrap();
         let rest: Vec<_> = rest.commits.iter().map(|c| c.commit.id.clone()).collect();
         assert_eq!(rest, all[1..]);
 
         let mut args = history_args("src");
         args.follow_renames = true;
-        assert!(file_history(&repo, args).is_err(), "follow needs a file");
-        assert!(file_history(&repo, history_args("../x")).is_err());
         assert!(
-            file_history(&repo, history_args("missing"))
+            file_history(&repo, args, &Watch::none()).is_err(),
+            "follow needs a file"
+        );
+        assert!(file_history(&repo, history_args("../x"), &Watch::none()).is_err());
+        assert!(
+            file_history(&repo, history_args("missing"), &Watch::none())
                 .unwrap()
                 .commits
                 .is_empty()
@@ -689,7 +703,7 @@ mod tests {
         let root = dir.path();
         let mut args = search_args();
         args.message_regex = Some("(?i)FIXES #\\d+".into());
-        let res = search_commits(&repo, args).unwrap();
+        let res = search_commits(&repo, args, &Watch::none()).unwrap();
         assert_eq!(
             ids(&res.commits),
             git_ids(root, &["-i", "--grep=fixes #[0-9]"])
@@ -698,17 +712,22 @@ mod tests {
 
         let mut args = search_args();
         args.author = Some("test@example\\.com".into());
-        let res = search_commits(&repo, args).unwrap();
+        let res = search_commits(&repo, args, &Watch::none()).unwrap();
         assert_eq!(res.commits.len(), git_ids(root, &[]).len());
 
         let mut args = search_args();
         args.author = Some("^Nobody".into());
-        assert!(search_commits(&repo, args).unwrap().commits.is_empty());
+        assert!(
+            search_commits(&repo, args, &Watch::none())
+                .unwrap()
+                .commits
+                .is_empty()
+        );
 
         let mut args = search_args();
         args.path = Some("src/lib.rs".into());
         args.message_regex = Some("lib".into());
-        let res = search_commits(&repo, args).unwrap();
+        let res = search_commits(&repo, args, &Watch::none()).unwrap();
         assert_eq!(
             ids(&res.commits),
             git_ids(root, &["--grep=lib", "--", "src/lib.rs"])
@@ -736,7 +755,7 @@ mod tests {
         let mut args = search_args();
         args.since = Some("2021-01-01".into());
         args.until = Some("2023-01-01".into());
-        let res = search_commits(&repo, args).unwrap();
+        let res = search_commits(&repo, args, &Watch::none()).unwrap();
         assert_eq!(
             ids(&res.commits),
             git_ids(root, &["--since=2021-01-01", "--until=2023-01-01"])
@@ -745,10 +764,21 @@ mod tests {
 
         let mut args = search_args();
         args.since = Some("2999-01-01".into());
-        assert!(search_commits(&repo, args).unwrap().commits.is_empty());
+        assert!(
+            search_commits(&repo, args, &Watch::none())
+                .unwrap()
+                .commits
+                .is_empty()
+        );
         let mut args = search_args();
         args.since = Some("10 years ago".into());
-        assert_eq!(search_commits(&repo, args).unwrap().commits.len(), 5);
+        assert_eq!(
+            search_commits(&repo, args, &Watch::none())
+                .unwrap()
+                .commits
+                .len(),
+            5
+        );
     }
 
     #[test]
@@ -756,12 +786,18 @@ mod tests {
         let (_dir, repo) = fixture_repo();
         let mut args = search_args();
         args.message_regex = Some("(".into());
-        let err = format!("{:#}", search_commits(&repo, args).unwrap_err());
+        let err = format!(
+            "{:#}",
+            search_commits(&repo, args, &Watch::none()).unwrap_err()
+        );
         assert!(err.contains("message_regex"), "{err}");
 
         let mut args = search_args();
         args.since = Some("not a date at all".into());
-        let err = format!("{:#}", search_commits(&repo, args).unwrap_err());
+        let err = format!(
+            "{:#}",
+            search_commits(&repo, args, &Watch::none()).unwrap_err()
+        );
         assert!(err.contains("`since`"), "{err}");
     }
 
@@ -770,8 +806,53 @@ mod tests {
         let (_dir, repo) = history_fixture();
         let mut args = search_args();
         args.limit = Some(2);
-        let page = search_commits(&repo, args).unwrap();
+        let page = search_commits(&repo, args, &Watch::none()).unwrap();
         assert_eq!(page.commits.len(), 2);
         assert!(page.truncated);
+    }
+
+    #[test]
+    fn walks_report_progress_and_stop_when_cancelled() {
+        use crate::tools::testutil::{cancelled_watch, recording_watch};
+        let (dir, repo) = fixture_repo();
+        let commits = git_stdout(dir.path(), &["rev-list", "--count", "HEAD"]);
+        let commits: u64 = commits.trim().parse().unwrap();
+
+        let (watch, _, seen) = recording_watch(std::time::Duration::ZERO);
+        log(&repo, log_args(Some(500), None), &watch).unwrap();
+        let last = seen.lock().unwrap().last().cloned().unwrap();
+        assert_eq!((last.done, last.total), (commits, None));
+        assert_eq!(last.message, format!("{commits} commits walked"));
+
+        let (watch, _, seen) = recording_watch(std::time::Duration::ZERO);
+        search_commits(&repo, search_args(), &watch).unwrap();
+        assert!(
+            seen.lock()
+                .unwrap()
+                .last()
+                .unwrap()
+                .message
+                .ends_with("commits scanned")
+        );
+
+        let (watch, _, seen) = recording_watch(std::time::Duration::ZERO);
+        file_history(&repo, history_args("a.txt"), &watch).unwrap();
+        assert!(
+            seen.lock()
+                .unwrap()
+                .last()
+                .unwrap()
+                .message
+                .ends_with("commits found")
+        );
+
+        let cancelled = [
+            log(&repo, log_args(None, None), &cancelled_watch()).map(drop),
+            search_commits(&repo, search_args(), &cancelled_watch()).map(drop),
+            file_history(&repo, history_args("a.txt"), &cancelled_watch()).map(drop),
+        ];
+        for result in cancelled {
+            assert!(result.unwrap_err().to_string().contains("cancelled"));
+        }
     }
 }

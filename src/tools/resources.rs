@@ -680,6 +680,10 @@ mod tests {
             ("gitrs://diff/..HEAD", "revision is missing"),
             ("gitrs://commit/%FF", "percent-encoded UTF-8"),
             ("gitrs://commit/no-such-rev", "no-such-rev"),
+            // Decoding happens before the path checks, so encoded escapes are refused too.
+            ("gitrs://file/worktree/%2E%2E/outside", ".."),
+            ("gitrs://file/worktree/.GIT/config", "inside `.git`"),
+            ("gitrs://file/HEAD/%2Fetc%2Fpasswd", "absolute"),
         ];
         for (uri, message) in cases {
             let err = format!("{:#}", read(&repo, uri).unwrap_err());

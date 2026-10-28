@@ -109,6 +109,7 @@ Repository overview: paths, HEAD, current branch, bareness, shallowness, and any
 | `head_branch` | string \| null | Short branch name HEAD points to; `null` when detached. |
 | `head_commit` | string \| null | Commit HEAD resolves to; `null` in a fresh repository with no commits. |
 | `in_progress` | string \| null | In-progress operation such as `Merge` or `Rebase`, if any. |
+| `trusted` | boolean | False when the repository isn't owned by you and isn't listed in `safe.directory`: its repository-local config is ignored and write tools refuse to run. See [security](security.md#repositories-owned-by-someone-else). |
 
 **Example**
 
@@ -124,6 +125,7 @@ Repository overview: paths, HEAD, current branch, bareness, shallowness, and any
   "in_progress": null,
   "is_bare": false,
   "is_shallow": false,
+  "trusted": true,
   "workdir": "/path/to/demo"
 }
 ```

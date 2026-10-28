@@ -1535,6 +1535,38 @@ mod tests {
         assert_eq!(ls_files(ours.path()), ls_files(theirs.path()));
     }
 
+    /// A commit whose tree has `.GIT/config` (CVE-2014-9390): on a case-insensitive filesystem, checking
+    /// it out would overwrite the repository's own config, so gix's path validation must refuse it.
+    #[test]
+    fn trees_that_write_into_git_are_refused() {
+        use crate::tools::testutil::git_output;
+        let (dir, repo) = fixture_repo();
+        let root = dir.path();
+        let stdout = |args: &[&str], input: &str| {
+            let out = git_output(root, args, input.as_bytes());
+            String::from_utf8(out.stdout).unwrap().trim().to_owned()
+        };
+        let blob = stdout(
+            &["hash-object", "-w", "--stdin"],
+            "[core]\n\tpwned = true\n",
+        );
+        let inner = stdout(&["mktree"], &format!("100644 blob {blob}\tconfig\n"));
+        let a = stdout(&["rev-parse", "HEAD:a.txt"], "");
+        let tree = stdout(
+            &["mktree"],
+            &format!("040000 tree {inner}\t.GIT\n100644 blob {a}\ta.txt\n"),
+        );
+        let commit = stdout(&["commit-tree", &tree, "-p", "HEAD", "-m", "evil"], "");
+        run_git(root, &["branch", "evil", &commit]);
+
+        let config = std::fs::read(root.join(".git/config")).unwrap();
+        let before = snapshot(root);
+        let result = switch_to(&repo, "evil");
+        assert!(result.is_err(), "{result:?}");
+        assert_eq!(std::fs::read(root.join(".git/config")).unwrap(), config);
+        assert_unchanged(root, &before);
+    }
+
     #[test]
     fn writes_through_symlinked_directories_are_refused() {
         let (dir, _) = fixture_repo();

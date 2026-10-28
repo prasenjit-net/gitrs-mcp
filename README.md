@@ -134,6 +134,7 @@ The full reference, with every argument, result field, error and a real example 
 ## Documentation
 
 - [docs/tools.md](docs/tools.md): tool reference.
+- [docs/security.md](docs/security.md): threat model, guarantees and the tests behind them.
 - [docs/resources.md](docs/resources.md): `gitrs://` resources, prompts and argument completion.
 - [docs/configuration.md](docs/configuration.md): CLI flags, environment, git settings that affect results, and client setup.
 - [docs/architecture.md](docs/architecture.md): layers, data flow, the sync/async bridge, and the safety model.

@@ -88,6 +88,22 @@ impl GitServer {
         self.repos.select(name.as_deref())
     }
 
+    /// Like [`Self::repo`], for write tools: a repository the current user doesn't own, and that
+    /// isn't listed in `safe.directory`, is refused, as git refuses to work in it at all. Reads still
+    /// work there, with its repository-local config ignored.
+    fn writable(&self, name: Option<String>) -> Result<RepoHandle, String> {
+        let handle = self.repo(name)?;
+        if !handle.is_trusted() {
+            return Err(format!(
+                "{} isn't owned by you and isn't listed in safe.directory, so write tools are disabled \
+                 for it; if you trust it, run `git config --global --add safe.directory {}`",
+                handle.root().display(),
+                handle.root().display()
+            ));
+        }
+        Ok(handle)
+    }
+
     /// Serve the repositories at the client's MCP roots, when it declares any. The request runs on
     /// its own task: notification handlers run inside the message loop, which has to stay free to
     /// receive the client's answer.

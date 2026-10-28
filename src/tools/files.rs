@@ -209,7 +209,7 @@ fn worktree_file_kind(_meta: &std::fs::Metadata) -> EntryKind {
 
 /// `path` under the worktree, refusing `.git` internals and parents that are symlinks leading outside.
 pub fn worktree_path(workdir: &Path, path: &BStr) -> anyhow::Result<PathBuf> {
-    if path.split(|b| *b == b'/').next() == Some(b".git".as_slice()) {
+    if path.split(|b| *b == b'/').any(is_git_dir_name) {
         bail!("`{path}` is inside `.git`; read repository data through the other tools instead");
     }
     let full = workdir.join(gix::path::from_bstr(path)?);
@@ -224,6 +224,17 @@ pub fn worktree_path(workdir: &Path, path: &BStr) -> anyhow::Result<PathBuf> {
         );
     }
     Ok(full)
+}
+
+/// Whether a path component names a `.git` directory as the filesystem may see it: case-insensitive
+/// filesystems (macOS, Windows) match any case, and NTFS ignores trailing dots and spaces. git
+/// refuses such components anywhere in a path for the same reason.
+fn is_git_dir_name(component: &[u8]) -> bool {
+    let trimmed = component
+        .iter()
+        .rposition(|b| *b != b'.' && *b != b' ')
+        .map_or(&component[..0], |last| &component[..=last]);
+    trimmed.eq_ignore_ascii_case(b".git")
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -587,6 +598,57 @@ mod tests {
             msg(read(&repo, "escape/secret.txt", Some("worktree")))
                 .contains("outside the repository")
         );
+    }
+
+    #[test]
+    fn git_directories_are_refused_whatever_their_spelling() {
+        let (dir, repo) = tree_fixture();
+        let nested = dir.path().join("vendor");
+        std::fs::create_dir_all(&nested).unwrap();
+        run_git(&nested, &["init", "-q"]);
+        // Case-insensitive filesystems (macOS, Windows) resolve these to the real `.git`; NTFS also
+        // ignores trailing dots and spaces. git refuses a `.git` component anywhere in a path.
+        for path in [
+            ".GIT/config",
+            ".Git/HEAD",
+            ".git./config",
+            "vendor/.git/config",
+        ] {
+            let err = read(&repo, path, Some("worktree")).unwrap_err();
+            assert!(
+                format!("{err:#}").contains("inside `.git`"),
+                "{path}: {err:#}"
+            );
+        }
+        assert!(
+            read(&repo, ".gitignore", Some("worktree"))
+                .is_err_and(|e| !format!("{e:#}").contains(".git`"))
+        );
+    }
+
+    #[test]
+    fn core_worktree_moves_the_working_tree() {
+        let (dir, _) = fixture_repo();
+        let elsewhere = tempfile::tempdir().unwrap();
+        write(elsewhere.path(), "a.txt", "from the configured worktree\n");
+        run_git(
+            dir.path(),
+            &[
+                "config",
+                "core.worktree",
+                elsewhere.path().to_str().unwrap(),
+            ],
+        );
+        let repo = open(dir.path());
+        assert_eq!(
+            read(&repo, "a.txt", Some("worktree"))
+                .unwrap()
+                .content
+                .as_deref(),
+            Some("from the configured worktree\n")
+        );
+        assert!(read(&repo, ".git/config", Some("worktree")).is_err());
+        assert!(read(&repo, "../a.txt", Some("worktree")).is_err());
     }
 
     #[test]

@@ -91,6 +91,25 @@ impl RepoHandle {
         self.repo.git_dir()
     }
 
+    /// Whether the repository is fully trusted: owned by the current user, or listed in
+    /// `safe.directory`. Otherwise gix ignores its repository-local config, as git refuses to use it.
+    pub fn is_trusted(&self) -> bool {
+        self.run_now(|r| r.git_dir_trust() == gix::sec::Trust::Full)
+    }
+
+    /// Open `path` isolated, as [`Self::open_isolated`] does, with the given trust level, to test
+    /// how repositories the current user doesn't own are handled.
+    #[cfg(test)]
+    pub fn open_with_trust(path: &Path, trust: gix::sec::Trust) -> Self {
+        let options = gix::open::Options::isolated().with(trust);
+        Self {
+            repo: gix::ThreadSafeRepository::open_opts(path, options)
+                .expect("test repository opens"),
+            root: Arc::new(std::fs::canonicalize(path).expect("test repository path resolves")),
+            id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
+        }
+    }
+
     pub fn is_bare(&self) -> bool {
         self.repo.work_dir().is_none()
     }

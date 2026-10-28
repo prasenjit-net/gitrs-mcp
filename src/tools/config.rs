@@ -67,6 +67,7 @@ pub struct ConfigEntry {
     pub file: Option<String>,
     /// True when `value` was hidden because it may be a secret: anything under `credential`, keys whose
     /// name contains `password`, `passwd`, `token` or `secret`, `http.extraHeader`, and the password in a URL.
+    /// Also true when the password of a URL in the key's subsection (`url.<base>`, `http.<url>`) was hidden.
     pub redacted: bool,
 }
 
@@ -121,14 +122,19 @@ fn section_entries(
             // `key` (true); only `value_implicit` tells them apart. It inspects the key's last
             // occurrence, which is exact unless one section mixes both forms of the same key.
             let implicit = value.is_empty() && body.value_implicit(&key) == Some(None);
-            let (value, redacted) = if implicit {
+            let (value, value_redacted) = if implicit {
                 (None, false)
             } else {
                 redact(&name, &key, value.to_string())
             };
+            // Subsections such as `url.<base>` or `http.<url>` can carry a URL with its password.
+            let shown_subsection = subsection.as_deref().map(|sub| {
+                redact_url_password(sub).map_or((sub.to_owned(), false), |safe| (safe, true))
+            });
+            let redacted = value_redacted || shown_subsection.as_ref().is_some_and(|(_, hid)| *hid);
             ConfigEntry {
-                key: match &subsection {
-                    Some(sub) => format!("{name}.{sub}.{key}"),
+                key: match shown_subsection {
+                    Some((sub, _)) => format!("{name}.{sub}.{key}"),
                     None => format!("{name}.{key}"),
                 },
                 value,
@@ -383,6 +389,11 @@ mod tests {
             "https://user:s3cret@example.com/repo.git",
         );
         set("remote.mirror.url", "https://user@example.com/repo.git");
+        // A subsection can hold a URL with its password: the key itself must be redacted too.
+        set(
+            "url.https://bob:subpass@example.com/.insteadOf",
+            "https://example.com/",
+        );
         let repo = open(root);
         let res = config_get(&repo, args(None, None)).unwrap();
         let get = |key: &str| res.entries.iter().find(|e| e.key == key).unwrap();
@@ -403,7 +414,10 @@ mod tests {
         assert!(url.redacted);
         assert!(!get("remote.mirror.url").redacted);
         let rendered = serde_json::to_string(&res).unwrap();
-        for secret in ["abc", "ghp_secret", "hunter2", "s3cret"] {
+        let rewrite = get("url.https://bob:<redacted>@example.com/.insteadof");
+        assert!(rewrite.redacted);
+        assert_eq!(rewrite.value.as_deref(), Some("https://example.com/"));
+        for secret in ["abc", "ghp_secret", "hunter2", "s3cret", "subpass"] {
             assert!(!rendered.contains(secret), "{secret} leaked");
         }
     }

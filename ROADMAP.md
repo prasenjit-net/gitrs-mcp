@@ -14,7 +14,7 @@ _Last updated 2026-10-27._
 | 3 Safe writes | ✅ Done: 10 tools behind `--allow-write`, each checked against the git CLI |
 | 4 History rewriting | ✅ Done: 12 tools behind `--allow-write`, each checked against the git CLI, with git and gitrs-mcp able to continue each other's operations |
 | 5 MCP-native extras | ✅ Done: resources, prompts, completion, progress and cancellation, `--watch`, several repositories, caching and benchmarks |
-| 6 Hardening and release | Planned |
+| 6 Hardening and release | 🚧 In progress: security review done |
 
 The server has 28 read-only tools, plus 22 write tools registered only with `--allow-write`, along with resources, prompts and completion. 262 unit tests and the end-to-end smoke test pass, with 96.7% line coverage.
 
@@ -401,7 +401,7 @@ gix has no sequencer, so this phase is where we build our own logic on its primi
 
 ## Phase 6: Hardening and release
 
-- **Security review.**
+- **Security review.** ✅
   - Paths: no `..` escapes, no following symlinks out of the worktree, and `core.worktree` overrides honoured safely.
   - Ownership checks: gix's `git_dir_trust`, the equivalent of git's `safe.directory`.
   - Redaction: config values with secrets are redacted.
@@ -411,6 +411,14 @@ gix has no sequencer, so this phase is where we build our own logic on its primi
   - `cargo install gitrs-mcp`, prebuilt binaries via `cargo-dist`, a Homebrew tap.
   - Docs with copy-paste client config for Claude Code (`claude mcp add gitrs -- gitrs-mcp --repo .`), Claude Desktop, VS Code and Cursor.
 - **Versioning.** Tool names and schemas are a public API. Use semver: add fields freely, and never rename or remove fields within a major version.
+
+### Phase 6: deviations from the plan
+
+- **Security review.** The guarantees, and the tests behind each, are in [docs/security.md](docs/security.md). Two leaks were found and fixed, each starting with a failing test:
+  - Working-tree reads refused only a first path component spelled exactly `.git`. On macOS's case-insensitive filesystem, `read_file` with `.GIT/config` returned the repository's config, credentials included. Any `.git` component is now refused, whatever its case and with trailing dots or spaces (NTFS), as git does.
+  - `config_get` redacted URL passwords in values but not in subsection names, so `url.https://user:pass@host/.insteadOf` showed the password in the key. Subsections are redacted too now.
+  - gix's checkout already refuses hostile trees that write into `.git` (CVE-2014-9390). A test now proves it for `switch`.
+  - Repositories the current user doesn't own, and that aren't listed in `safe.directory`, get reduced trust from gix, which ignores their repository-local config. gitrs-mcp keeps reads working there but refuses every write tool, closer to git, which refuses such repositories altogether. `repo_info` gained a `trusted` field.
 
 ---
 

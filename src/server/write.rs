@@ -25,7 +25,7 @@ impl GitServer {
         &self,
         Parameters(InRepo { repo, args }): Parameters<InRepo<tools::branches::CreateBranchArgs>>,
     ) -> Result<Json<tools::branches::BranchResult>, String> {
-        self.repo(repo)?
+        self.writable(repo)?
             .run(move |r| tools::branches::create_branch(r, args))
             .await
             .map(Json)
@@ -44,7 +44,7 @@ impl GitServer {
         &self,
         Parameters(InRepo { repo, args }): Parameters<InRepo<tools::branches::DeleteBranchArgs>>,
     ) -> Result<Json<tools::branches::DeleteBranchResult>, String> {
-        self.repo(repo)?
+        self.writable(repo)?
             .run(move |r| tools::branches::delete_branch(r, args))
             .await
             .map(Json)
@@ -62,7 +62,7 @@ impl GitServer {
         &self,
         Parameters(InRepo { repo, args }): Parameters<InRepo<tools::branches::RenameBranchArgs>>,
     ) -> Result<Json<tools::branches::RenameBranchResult>, String> {
-        self.repo(repo)?
+        self.writable(repo)?
             .run(move |r| tools::branches::rename_branch(r, args))
             .await
             .map(Json)
@@ -81,7 +81,7 @@ impl GitServer {
         &self,
         Parameters(InRepo { repo, args }): Parameters<InRepo<tools::branches::CreateTagArgs>>,
     ) -> Result<Json<tools::refs::ShowTagResult>, String> {
-        self.repo(repo)?
+        self.writable(repo)?
             .run(move |r| tools::branches::create_tag(r, args))
             .await
             .map(Json)
@@ -101,7 +101,7 @@ impl GitServer {
         &self,
         Parameters(InRepo { repo, args }): Parameters<InRepo<tools::staging::StageArgs>>,
     ) -> Result<Json<tools::staging::IndexUpdateResult>, String> {
-        self.repo(repo)?
+        self.writable(repo)?
             .run(move |r| tools::staging::stage(r, args))
             .await
             .map(Json)
@@ -119,7 +119,7 @@ impl GitServer {
         &self,
         Parameters(InRepo { repo, args }): Parameters<InRepo<tools::staging::UnstageArgs>>,
     ) -> Result<Json<tools::staging::IndexUpdateResult>, String> {
-        self.repo(repo)?
+        self.writable(repo)?
             .run(move |r| tools::staging::unstage(r, args))
             .await
             .map(Json)
@@ -139,7 +139,7 @@ impl GitServer {
         &self,
         Parameters(InRepo { repo, args }): Parameters<InRepo<tools::commit::CommitArgs>>,
     ) -> Result<Json<tools::commit::CommitResult>, String> {
-        self.repo(repo)?
+        self.writable(repo)?
             .run(move |r| tools::commit::commit(r, args))
             .await
             .map(Json)
@@ -159,7 +159,7 @@ impl GitServer {
         &self,
         Parameters(InRepo { repo, args }): Parameters<InRepo<tools::commit::ResetArgs>>,
     ) -> Result<Json<tools::commit::ResetResult>, String> {
-        self.repo(repo)?
+        self.writable(repo)?
             .run(move |r| tools::commit::reset(r, args))
             .await
             .map(Json)
@@ -178,7 +178,7 @@ impl GitServer {
         &self,
         Parameters(InRepo { repo, args }): Parameters<InRepo<tools::checkout::RestoreArgs>>,
     ) -> Result<Json<tools::checkout::RestoreResult>, String> {
-        self.repo(repo)?
+        self.writable(repo)?
             .run(move |r| tools::checkout::restore(r, args))
             .await
             .map(Json)
@@ -197,7 +197,7 @@ impl GitServer {
         &self,
         Parameters(InRepo { repo, args }): Parameters<InRepo<tools::checkout::SwitchArgs>>,
     ) -> Result<Json<tools::checkout::SwitchResult>, String> {
-        self.repo(repo)?
+        self.writable(repo)?
             .run(move |r| tools::checkout::switch(r, args))
             .await
             .map(Json)
@@ -217,7 +217,7 @@ impl GitServer {
         &self,
         Parameters(InRepo { repo, args }): Parameters<InRepo<tools::clean::CleanArgs>>,
     ) -> Result<Json<tools::clean::CleanResult>, String> {
-        self.repo(repo)?
+        self.writable(repo)?
             .run(move |r| tools::clean::clean(r, args))
             .await
             .map(Json)
@@ -235,7 +235,7 @@ impl GitServer {
         &self,
         Parameters(InRepo { repo, args }): Parameters<InRepo<tools::stash::StashPushArgs>>,
     ) -> Result<Json<tools::reflog::StashEntry>, String> {
-        self.repo(repo)?
+        self.writable(repo)?
             .run(move |r| tools::stash::stash_push(r, args))
             .await
             .map(Json)
@@ -254,7 +254,7 @@ impl GitServer {
         &self,
         Parameters(InRepo { repo, args }): Parameters<InRepo<tools::stash::StashPopArgs>>,
     ) -> Result<Json<tools::stash::StashPopResult>, String> {
-        self.repo(repo)?
+        self.writable(repo)?
             .run(move |r| tools::stash::stash_pop(r, args))
             .await
             .map(Json)
@@ -272,7 +272,7 @@ impl GitServer {
         &self,
         Parameters(InRepo { repo, args }): Parameters<InRepo<tools::stash::StashDropArgs>>,
     ) -> Result<Json<tools::stash::StashDropResult>, String> {
-        self.repo(repo)?
+        self.writable(repo)?
             .run(move |r| tools::stash::stash_drop(r, args))
             .await
             .map(Json)
@@ -292,7 +292,7 @@ impl GitServer {
         &self,
         Parameters(InRepo { repo, args }): Parameters<InRepo<tools::integrate::MergeArgs>>,
     ) -> Result<Json<tools::integrate::OperationResult>, String> {
-        self.repo(repo)?
+        self.writable(repo)?
             .run(move |r| tools::integrate::merge(r, args))
             .await
             .map(Json)
@@ -310,7 +310,7 @@ impl GitServer {
         &self,
         Parameters(InRepo { repo, args }): Parameters<InRepo<tools::integrate::PickArgs>>,
     ) -> Result<Json<tools::integrate::OperationResult>, String> {
-        self.repo(repo)?
+        self.writable(repo)?
             .run(move |r| tools::integrate::cherry_pick(r, args))
             .await
             .map(Json)
@@ -328,7 +328,7 @@ impl GitServer {
         &self,
         Parameters(InRepo { repo, args }): Parameters<InRepo<tools::integrate::PickArgs>>,
     ) -> Result<Json<tools::integrate::OperationResult>, String> {
-        self.repo(repo)?
+        self.writable(repo)?
             .run(move |r| tools::integrate::revert(r, args))
             .await
             .map(Json)
@@ -347,7 +347,7 @@ impl GitServer {
         &self,
         Parameters(InRepo { repo, args }): Parameters<InRepo<tools::rebase::RebaseArgs>>,
     ) -> Result<Json<tools::integrate::OperationResult>, String> {
-        self.repo(repo)?
+        self.writable(repo)?
             .run(move |r| tools::rebase::rebase(r, args))
             .await
             .map(Json)
@@ -366,7 +366,7 @@ impl GitServer {
         &self,
         Parameters(InRepo { repo, args }): Parameters<InRepo<tools::integrate::ContinueArgs>>,
     ) -> Result<Json<tools::integrate::OperationResult>, String> {
-        self.repo(repo)?
+        self.writable(repo)?
             .run(move |r| tools::integrate::continue_operation(r, args))
             .await
             .map(Json)
@@ -385,7 +385,7 @@ impl GitServer {
         &self,
         Parameters(RepoOnly { repo }): Parameters<RepoOnly>,
     ) -> Result<Json<tools::integrate::OperationResult>, String> {
-        self.repo(repo)?
+        self.writable(repo)?
             .run(tools::integrate::abort_operation)
             .await
             .map(Json)
@@ -403,7 +403,7 @@ impl GitServer {
         &self,
         Parameters(InRepo { repo, args }): Parameters<InRepo<tools::worktrees::WorktreeAddArgs>>,
     ) -> Result<Json<tools::worktrees::WorktreeEntry>, String> {
-        self.repo(repo)?
+        self.writable(repo)?
             .run(move |r| tools::worktrees::worktree_add(r, args))
             .await
             .map(Json)
@@ -421,7 +421,7 @@ impl GitServer {
         &self,
         Parameters(InRepo { repo, args }): Parameters<InRepo<tools::worktrees::WorktreeRemoveArgs>>,
     ) -> Result<Json<tools::worktrees::WorktreeRemoveResult>, String> {
-        self.repo(repo)?
+        self.writable(repo)?
             .run(move |r| tools::worktrees::worktree_remove(r, args))
             .await
             .map(Json)
@@ -432,6 +432,57 @@ impl GitServer {
 mod tests {
     use super::*;
     use crate::{repo::RepoHandle, server::Policy, tools::testutil::fixture_repo};
+
+    #[tokio::test]
+    async fn write_tools_refuse_untrusted_repositories() {
+        use crate::tools::testutil::{assert_unchanged, snapshot, write};
+        let (dir, _) = fixture_repo();
+        write(dir.path(), "new.txt", "unstaged\n");
+        let server = GitServer::serving(
+            vec![RepoHandle::open_with_trust(
+                dir.path(),
+                gix::sec::Trust::Reduced,
+            )],
+            Policy {
+                allow_write: true,
+                watch_interval: None,
+            },
+        );
+        let before = snapshot(dir.path());
+        let staged = server
+            .stage(in_default(tools::staging::StageArgs {
+                paths: vec!["new.txt".into()],
+                all: false,
+            }))
+            .await;
+        let err = staged.err().expect("staging is refused");
+        assert!(err.contains("safe.directory"), "{err}");
+        let aborted = server
+            .abort_operation(Parameters(RepoOnly::default()))
+            .await;
+        assert!(aborted.err().unwrap().contains("safe.directory"));
+        assert_unchanged(dir.path(), &before);
+        // Reads still work.
+        let info = server
+            .repo(None)
+            .unwrap()
+            .run(tools::repo::repo_info)
+            .await
+            .unwrap();
+        assert!(!info.trusted);
+    }
+
+    /// Every write tool picks its repository with the trust check.
+    #[test]
+    fn every_write_wrapper_checks_trust() {
+        let source = include_str!("write.rs");
+        let wrappers = &source[..source.find("#[cfg(test)]").unwrap()];
+        assert!(
+            !wrappers.contains("self.repo("),
+            "use self.writable(repo) in write wrappers"
+        );
+        assert_eq!(wrappers.matches("self.writable(repo)?").count(), 22);
+    }
 
     /// Tool arguments for the default repository.
     fn in_default<T>(args: T) -> Parameters<InRepo<T>> {

@@ -44,6 +44,22 @@ jobs:
       - run: git config --global user.name CI && git config --global user.email ci@example.com
       - run: make coverage
 
+  install-script:
+    name: install.sh (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: ShellCheck
+        if: runner.os == 'Linux'
+        run: shellcheck install.sh scripts/*.sh
+      - run: make test-install
+
   msrv:
     runs-on: ubuntu-latest
     steps:

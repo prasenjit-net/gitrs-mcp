@@ -28,7 +28,11 @@ gitrs-mcp setup                              # pick the agents to register it wi
 Once the first release is published, prebuilt binaries for macOS, Linux and Windows are attached to each [GitHub release](https://github.com/prasenjit-net/gitrs-mcp/releases), with installers:
 
 ```sh
-# macOS and Linux
+# macOS and Linux: installs to ~/.local/bin, checks the checksum, then offers `gitrs-mcp setup`
+curl -fsSL https://raw.githubusercontent.com/prasenjit-net/gitrs-mcp/master/install.sh | sh
+# (options: --version v0.1.0, --dir <path>, --no-setup, --dry-run, --uninstall; add them after `sh -s --`)
+
+# or cargo-dist's installer (installs to ~/.cargo/bin; run `gitrs-mcp setup` afterwards)
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/prasenjit-net/gitrs-mcp/releases/latest/download/gitrs-mcp-installer.sh | sh
 
 # Windows (PowerShell)

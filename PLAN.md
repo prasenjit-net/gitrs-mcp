@@ -154,7 +154,7 @@ Needs you; see [Manual steps](#manual-steps-for-you).
 - [ ] Before the first tag, run `dist plan` and `dist build` for the host target. Neither exercises the publish job or the token.
 - [ ] Rehearse with a tag such as `v0.1.0-rc.1`. First check how cargo-dist treats pre-release tags (`dist plan --tag ...`): it may skip the Homebrew job for them. Delete the rehearsal tag and release afterwards.
 - [ ] Record the exact release asset names (archive, `.sha256`, `sha256.sum`) that 8.3 depends on.
-- [ ] Decide the archive format. cargo-dist's default for Unix is `.tar.xz`; minimal containers often lack `xz`, so `.tar.gz` may be safer (look for the matching dist option).
+- [x] Decide the archive format: done, `.tar.gz` (`unix-archive` in `dist-workspace.toml`). cargo-dist's default for Unix is `.tar.xz`; minimal containers often lack `xz`, so `.tar.gz` may be safer (look for the matching dist option).
 - [ ] Linux builds are glibc only, so Alpine and static-binary containers aren't supported. Evaluate adding `*-unknown-linux-musl` targets (gix pulls in some C code, so check the musl build first).
 - [ ] Tag `v0.1.0`, `cargo publish`, update the README's "once the first release is published" notes.
 
@@ -171,21 +171,23 @@ The formula installs the prebuilt binary and covers macOS and Linux on Intel and
 
 ### 8.3 `install.sh`
 
+**Status: built and tested against a fixture release on macOS and Debian (dash).** Extras: `--print-target` (used by the tests). `--uninstall` offers `setup --remove` first. Under `curl | sh` the script reads answers from `/dev/tty`.
+
 ```sh
 curl -fsSL https://raw.githubusercontent.com/prasenjit-net/gitrs-mcp/master/install.sh | sh
 curl -fsSL .../install.sh | sh -s -- --version v0.1.0 --no-setup
 ```
 
-- [ ] **Where:** `install.sh` at the repository root, so the URL is short. It only ever downloads release assets, so serving it from `master` is safe.
-- [ ] **Behaviour:**
+- [x] **Where:** `install.sh` at the repository root, so the URL is short. It only ever downloads release assets, so serving it from `master` is safe.
+- [x] **Behaviour:**
   - POSIX `sh`, not bash, so it runs under dash and Alpine's ash.
   - Detect OS and architecture to a cargo-dist target; recognise an Apple Silicon shell running under Rosetta (`sysctl -n sysctl.proc_translated`); fail clearly on unsupported systems, with a pointer to `cargo install`.
   - Download the archive for `latest` (the `releases/latest/download/` redirect, which has no API rate limit) or for `--version`, plus its checksum; verify with `sha256sum` or `shasum -a 256`; stop on a mismatch.
   - Install to `$GITRS_INSTALL_DIR` or `~/.local/bin`. Never use `sudo`. If the directory isn't on `PATH`, print the exact line to add; don't edit shell profiles unprompted.
   - Unless `--no-setup`, run `<dir>/gitrs-mcp setup`. Under `curl | sh`, stdin is the script itself, so the prompts must read from `/dev/tty`; without one, print `Run: gitrs-mcp setup` instead.
   - Flags: `--version`, `--dir`, `--no-setup`, `--dry-run` (download nothing, write nothing), `--uninstall` (remove the binary and remind about `setup --remove`).
-- [ ] **Safe to pipe into a shell:** all work inside a function called on the last line, so a truncated download can't run half a script; `set -eu`; `curl --proto '=https' --tlsv1.2`; a temporary directory removed on exit; no `eval`. Short enough to read before running, with a header comment saying what it does.
-- [ ] **Tests:**
+- [x] **Safe to pipe into a shell:** all work inside a function called on the last line, so a truncated download can't run half a script; `set -eu`; `curl --proto '=https' --tlsv1.2`; a temporary directory removed on exit; no `eval`. Short enough to read before running, with a header comment saying what it does.
+- [x] **Tests:** (the post-release workflow exists but has not run against a real release yet)
   - ShellCheck in CI.
   - A CI job that runs the script against a local fixture release directory (`GITRS_RELEASE_BASE_URL=file://...`, which curl supports) on Ubuntu and macOS: successful install, checksum mismatch fails, unsupported architecture fails, `PATH` warning, reinstall is idempotent, `--dry-run` writes nothing.
   - After each release, a workflow runs the real `curl | sh` on clean Ubuntu and macOS runners and calls `gitrs-mcp --version`.

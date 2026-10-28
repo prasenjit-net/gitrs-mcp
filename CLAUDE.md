@@ -55,7 +55,7 @@ The model only knows what the schema and descriptions tell it, so the documentat
 
 Run, in order, and fix everything before committing:
 
-1. `make check`: format check, clippy (warnings are errors), tests, and the MCP smoke test.
+1. `make check`: format check, clippy (warnings are errors), tests, the MCP smoke test, and the `install.sh` tests.
 2. `make coverage`: the coverage threshold.
 3. **Review the diff yourself** (`git diff --staged`). Look for:
    - duplicated logic, dead code, leftover debug output, `unwrap()` outside tests;

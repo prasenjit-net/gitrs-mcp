@@ -11,6 +11,9 @@ ci = "github"
 installers = ["shell", "powershell", "homebrew"]
 # Target platforms to build apps for (Rust target-triple syntax)
 targets = ["aarch64-apple-darwin", "aarch64-unknown-linux-gnu", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]
+# Unix archives are .tar.gz rather than dist's default .tar.xz, because install.sh must unpack them
+# with nothing but tar and gzip (minimal containers have no xz).
+unix-archive = ".tar.gz"
 # Path that installers should place binaries in
 install-path = "CARGO_HOME"
 # Where to host releases

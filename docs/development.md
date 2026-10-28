@@ -40,8 +40,10 @@ Run `make` (or `make help`) for the full list.
 | `make fmt` / `make fmt-check` | Format, or check formatting. |
 | `make clippy` | Lint with warnings as errors. |
 | `make smoke` | End-to-end MCP round trip over stdio: initialize, `tools/list`, then one call to every read tool against `REPO`; then a second session with `--allow-write` that checks the write tools are listed only there and calls some of them in ways that can't change anything. Fails if any call has an unexpected outcome or gets no answer. |
+| `make test-install` | Run `install.sh` against a fixture release served from a local directory (`file://`): install, checksum mismatch, unsupported CPU, `--dry-run`, reinstall, uninstall. No network. |
+| `make shellcheck` | ShellCheck on `install.sh` and `scripts/*.sh` (needs `shellcheck`). CI runs it. |
 | `make inspector` | Open the [MCP Inspector](https://github.com/modelcontextprotocol/inspector) against the server, to try tools by hand. |
-| `make check` | `fmt-check`, `clippy`, `test` and `smoke`: everything CI should run. |
+| `make check` | `fmt-check`, `clippy`, `test`, `smoke` and `test-install`: everything CI should run. |
 | `make coverage` | Line coverage summary; fails below 80% (`COVERAGE_MIN`). |
 | `make stress` | Release build, then the heaviest calls at their largest limits on `REPO`, such as deep history, whole-tree listings and big diffs. Fails if any call errors or returns more than 4 MiB. |
 | `make fuzz` | Runs each cargo-fuzz target in `fuzz/` for `FUZZ_TIME` seconds (default 60). Needs `rustup toolchain install nightly` and `cargo install cargo-fuzz`. |
@@ -197,6 +199,8 @@ For each release:
 3. Make sure `api/schema.json` is current (`make api`), and that `make check` and `dist plan` pass.
 4. Commit, then tag and push: `git tag v0.1.0 && git push origin v0.1.0`. The release workflow builds the binaries for macOS (Apple Silicon and Intel), Linux (x86_64 and arm64) and Windows. It then creates the GitHub release with the shell and PowerShell installers, and pushes the Homebrew formula.
 5. Publish the crate: `cargo publish`.
+
+`install.sh` at the repository root installs from the release assets, which are named by cargo-dist: `gitrs-mcp-<target>.tar.gz` (`unix-archive` in `dist-workspace.toml` makes them gzip rather than xz, so minimal systems can unpack them), a `.sha256` file beside each, and `gitrs-mcp-installer.{sh,ps1}`. If an asset name changes, change `install.sh` and `scripts/test-install.sh` with it. After a release, the *Post-release check* workflow runs the real `curl | sh` on Ubuntu and macOS.
 
 ## Before committing
 

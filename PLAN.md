@@ -156,7 +156,7 @@ Needs you; see [Manual steps](#manual-steps-for-you).
 - [ ] Record the exact release asset names (archive, `.sha256`, `sha256.sum`) that 8.3 depends on.
 - [x] Decide the archive format: done, `.tar.gz` (`unix-archive` in `dist-workspace.toml`). cargo-dist's default for Unix is `.tar.xz`; minimal containers often lack `xz`, so `.tar.gz` may be safer (look for the matching dist option).
 - [ ] Linux builds are glibc only, so Alpine and static-binary containers aren't supported. Evaluate adding `*-unknown-linux-musl` targets (gix pulls in some C code, so check the musl build first).
-- [ ] Tag `v0.1.0`, `cargo publish`, update the README's "once the first release is published" notes.
+- [x] Tag `v0.1.0` (released 2026-10-28; Homebrew formula published, `brew install` verified). `cargo publish` runs from the *Publish crate* workflow once `CARGO_REGISTRY_TOKEN` is set. README notes updated.
 
 ### 8.2 Homebrew
 

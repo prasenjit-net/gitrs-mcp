@@ -17,7 +17,7 @@ It lets AI assistants inspect a Git repository through typed tools with structur
 ## Quick start
 
 ```sh
-brew install prasenjit-net/tap/gitrs-mcp    # or any install route below (once 0.1.0 is released)
+brew install prasenjit-net/tap/gitrs-mcp    # or any install route below
 gitrs-mcp setup                              # pick the agents to register it with
 ```
 
@@ -25,7 +25,7 @@ gitrs-mcp setup                              # pick the agents to register it wi
 
 ## Install
 
-Once the first release is published, prebuilt binaries for macOS, Linux and Windows are attached to each [GitHub release](https://github.com/prasenjit-net/gitrs-mcp/releases), with installers:
+Prebuilt binaries for macOS, Linux and Windows are attached to each [GitHub release](https://github.com/prasenjit-net/gitrs-mcp/releases), with installers:
 
 ```sh
 # macOS and Linux: installs to ~/.local/bin, checks the checksum, then offers `gitrs-mcp setup`
@@ -41,11 +41,11 @@ powershell -ExecutionPolicy Bypass -c "irm https://github.com/prasenjit-net/gitr
 # Homebrew
 brew install prasenjit-net/tap/gitrs-mcp
 
-# crates.io (needs Rust 1.89+)
+# crates.io (needs Rust 1.89+; available once the crate is published)
 cargo install gitrs-mcp
 ```
 
-Until then, build it from source with Rust 1.89 or newer:
+Or build it from source with Rust 1.89 or newer:
 
 ```sh
 cargo install --git https://github.com/prasenjit-net/gitrs-mcp.git

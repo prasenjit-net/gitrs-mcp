@@ -1,0 +1,36 @@
+# Publishes the crate to crates.io once the Release workflow has succeeded for a tag.
+# Needs the repository secret CARGO_REGISTRY_TOKEN: a crates.io token with the publish-new and
+# publish-update scopes, limited to this crate. Run it by hand (Actions > Publish crate > Run
+# workflow) for a tag that is already released.
+name: Publish crate
+
+on:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish, for example v0.1.0
+        required: true
+
+jobs:
+  publish:
+    # A failed or skipped release (including pre-release tags, which have no release) publishes nothing.
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The tag that triggered the release, not whatever master has moved on to.
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event.workflow_run.head_branch }}
+      - uses: dtolnay/rust-toolchain@stable
+      - name: The tag matches Cargo.toml
+        run: |
+          tag="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event.workflow_run.head_branch }}"
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
+          [ "$tag" = "v$version" ] || { echo "tag $tag does not match Cargo.toml version $version"; exit 1; }
+      - name: Publish
+        run: cargo publish --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

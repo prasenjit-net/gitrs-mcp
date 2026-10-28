@@ -190,7 +190,7 @@ Releases are built by [cargo-dist](https://github.com/axodotdev/cargo-dist). Its
 Before the first release, set up the publishing targets once:
 
 - **Homebrew.** Create the `prasenjit-net/homebrew-tap` repository on GitHub. Then add a repository secret `HOMEBREW_TAP_TOKEN` to gitrs-mcp: a token that can push to the tap. The release workflow commits the formula there.
-- **crates.io.** Run `cargo login` with an API token. `cargo publish --dry-run` checks the package; its contents are limited by `include` in `Cargo.toml`.
+- **crates.io.** Create a crates.io API token (scopes `publish-new` and `publish-update`, limited to this crate) and store it as the repository secret `CARGO_REGISTRY_TOKEN`. The *Publish crate* workflow then publishes after each successful release; run it by hand with a tag for a release that already exists. Locally, `cargo publish --dry-run` checks the package; its contents are limited by `include` in `Cargo.toml`.
 
 For each release:
 
@@ -198,7 +198,7 @@ For each release:
 2. Move the `Unreleased` entries in [CHANGELOG.md](../CHANGELOG.md) under the new version.
 3. Make sure `api/schema.json` is current (`make api`), and that `make check` and `dist plan` pass.
 4. Commit, then tag and push: `git tag v0.1.0 && git push origin v0.1.0`. The release workflow builds the binaries for macOS (Apple Silicon and Intel), Linux (x86_64 and arm64) and Windows. It then creates the GitHub release with the shell and PowerShell installers, and pushes the Homebrew formula.
-5. Publish the crate: `cargo publish`.
+5. The *Publish crate* workflow publishes the crate to crates.io when the release succeeds.
 
 `install.sh` at the repository root installs from the release assets, which are named by cargo-dist: `gitrs-mcp-<target>.tar.gz` (`unix-archive` in `dist-workspace.toml` makes them gzip rather than xz, so minimal systems can unpack them), a `.sha256` file beside each, and `gitrs-mcp-installer.{sh,ps1}`. If an asset name changes, change `install.sh` and `scripts/test-install.sh` with it. After a release, the *Post-release check* workflow runs the real `curl | sh` on Ubuntu and macOS.
 

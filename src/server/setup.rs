@@ -5,7 +5,10 @@ use rmcp::{
     tool, tool_router,
 };
 
-use super::GitServer;
+use super::{
+    GitServer,
+    repos::{InRepo, RepoOnly},
+};
 use crate::tools;
 
 #[tool_router(router = setup_router, vis = "pub(super)")]
@@ -16,9 +19,9 @@ impl GitServer {
     #[tool(annotations(title = "List worktrees", read_only_hint = true))]
     async fn list_worktrees(
         &self,
-        Parameters(args): Parameters<tools::worktrees::ListWorktreesArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::worktrees::ListWorktreesArgs>>,
     ) -> Result<Json<tools::worktrees::ListWorktreesResult>, String> {
-        self.repo
+        self.repo(repo)?
             .run(move |r| tools::worktrees::list_worktrees(r, args))
             .await
             .map(Json)
@@ -30,9 +33,11 @@ impl GitServer {
     #[tool(annotations(title = "List submodules", read_only_hint = true))]
     async fn list_submodules(
         &self,
-        Parameters(args): Parameters<tools::submodules::ListSubmodulesArgs>,
+        Parameters(InRepo { repo, args }): Parameters<
+            InRepo<tools::submodules::ListSubmodulesArgs>,
+        >,
     ) -> Result<Json<tools::submodules::ListSubmodulesResult>, String> {
-        self.repo
+        self.repo(repo)?
             .run(move |r| tools::submodules::list_submodules(r, args))
             .await
             .map(Json)
@@ -44,9 +49,9 @@ impl GitServer {
     #[tool(annotations(title = "Get config", read_only_hint = true))]
     async fn config_get(
         &self,
-        Parameters(args): Parameters<tools::config::ConfigGetArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::config::ConfigGetArgs>>,
     ) -> Result<Json<tools::config::ConfigGetResult>, String> {
-        self.repo
+        self.repo(repo)?
             .run(move |r| tools::config::config_get(r, args))
             .await
             .map(Json)
@@ -55,7 +60,13 @@ impl GitServer {
     /// Object database statistics, like `git count-objects -v`: loose and packed object counts and
     /// sizes in bytes, the number of packs, and whether a commit-graph or multi-pack index exists.
     #[tool(annotations(title = "Count objects", read_only_hint = true))]
-    async fn count_objects(&self) -> Result<Json<tools::objects::CountObjectsResult>, String> {
-        self.repo.run(tools::objects::count_objects).await.map(Json)
+    async fn count_objects(
+        &self,
+        Parameters(RepoOnly { repo }): Parameters<RepoOnly>,
+    ) -> Result<Json<tools::objects::CountObjectsResult>, String> {
+        self.repo(repo)?
+            .run(tools::objects::count_objects)
+            .await
+            .map(Json)
     }
 }

@@ -7,7 +7,10 @@ use rmcp::{
     prompt, prompt_router,
 };
 
-use super::GitServer;
+use super::{
+    GitServer,
+    repos::{InRepo, RepoOnly},
+};
 use crate::tools;
 
 /// A prompt result with one user message. Failures (nothing staged, a bad revision) are invalid
@@ -28,8 +31,14 @@ impl GitServer {
     /// Write a commit message for the staged changes. Fills in the staged diff and the repository's
     /// recent commit subjects as a style guide. Fails when nothing is staged.
     #[prompt(title = "Write commit message")]
-    async fn write_commit_message(&self) -> Result<GetPromptResult, McpError> {
-        let text = self.repo.run(tools::prompts::write_commit_message).await;
+    async fn write_commit_message(
+        &self,
+        Parameters(RepoOnly { repo }): Parameters<RepoOnly>,
+    ) -> Result<GetPromptResult, McpError> {
+        let text = match self.repo(repo) {
+            Ok(handle) => handle.run(tools::prompts::write_commit_message).await,
+            Err(err) => Err(err),
+        };
         user_prompt("Commit message for the staged changes", text)
     }
 
@@ -38,12 +47,16 @@ impl GitServer {
     #[prompt(title = "Review changes")]
     async fn review_changes(
         &self,
-        Parameters(args): Parameters<tools::prompts::ReviewArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::prompts::ReviewArgs>>,
     ) -> Result<GetPromptResult, McpError> {
-        let text = self
-            .repo
-            .run(move |r| tools::prompts::review_changes(r, args))
-            .await;
+        let text = match self.repo(repo) {
+            Ok(handle) => {
+                handle
+                    .run(move |r| tools::prompts::review_changes(r, args))
+                    .await
+            }
+            Err(err) => Err(err),
+        };
         user_prompt("Code review of a diff, with blame context", text)
     }
 
@@ -52,12 +65,16 @@ impl GitServer {
     #[prompt(title = "Explain history")]
     async fn explain_history(
         &self,
-        Parameters(args): Parameters<tools::prompts::HistoryArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::prompts::HistoryArgs>>,
     ) -> Result<GetPromptResult, McpError> {
-        let text = self
-            .repo
-            .run(move |r| tools::prompts::explain_history(r, args))
-            .await;
+        let text = match self.repo(repo) {
+            Ok(handle) => {
+                handle
+                    .run(move |r| tools::prompts::explain_history(r, args))
+                    .await
+            }
+            Err(err) => Err(err),
+        };
         user_prompt("How a file evolved, from its history", text)
     }
 }

@@ -60,9 +60,11 @@ requests=(
   '{"jsonrpc":"2.0","id":38,"method":"prompts/get","params":{"name":"review_changes","arguments":{"from":"HEAD","to":"HEAD"}}}'
   # Subscriptions need --watch; the third session below has it.
   '{"jsonrpc":"2.0","id":39,"method":"resources/subscribe","params":{"uri":"gitrs://commit/HEAD"}}'
+  "$(call 40 list_repos '{}')"
+  "$(call 41 log '{"limit":1,"repo":"gitrs-smoke-no-such-repo"}')"
 )
-last_id=39
-expect_error='17 34 38 39' # space-separated request ids that must fail: a tool error, or a protocol error
+last_id=41
+expect_error='17 34 38 39 41' # space-separated request ids that must fail: a tool error, or a protocol error
 
 write_tools='create_branch delete_branch rename_branch create_tag stage unstage commit reset restore switch clean stash_push stash_pop stash_drop merge cherry_pick revert rebase continue_operation abort_operation worktree_add worktree_remove'
 write_requests=(

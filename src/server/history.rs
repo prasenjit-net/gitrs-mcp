@@ -7,7 +7,7 @@ use rmcp::{
     tool, tool_router,
 };
 
-use super::GitServer;
+use super::{GitServer, repos::InRepo};
 use crate::tools;
 
 #[tool_router(router = history_router, vis = "pub(super)")]
@@ -16,21 +16,23 @@ impl GitServer {
     #[tool(annotations(title = "Log", read_only_hint = true))]
     async fn log(
         &self,
-        Parameters(args): Parameters<tools::history::LogArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::history::LogArgs>>,
         context: RequestContext<RoleServer>,
     ) -> Result<Json<tools::history::LogResult>, String> {
-        self.run_watched(context, move |r, w| tools::history::log(r, args, w))
-            .await
-            .map(Json)
+        self.run_watched(self.repo(repo)?, context, move |r, w| {
+            tools::history::log(r, args, w)
+        })
+        .await
+        .map(Json)
     }
 
     /// Full metadata and message of a single commit (any revspec: SHA, branch, `HEAD~2`, tag).
     #[tool(annotations(title = "Show commit", read_only_hint = true))]
     async fn show_commit(
         &self,
-        Parameters(args): Parameters<tools::history::ShowCommitArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::history::ShowCommitArgs>>,
     ) -> Result<Json<tools::history::CommitDetail>, String> {
-        self.repo
+        self.repo(repo)?
             .run(move |r| tools::history::show_commit(r, args))
             .await
             .map(Json)
@@ -42,10 +44,10 @@ impl GitServer {
     #[tool(annotations(title = "File history", read_only_hint = true))]
     async fn file_history(
         &self,
-        Parameters(args): Parameters<tools::history::FileHistoryArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::history::FileHistoryArgs>>,
         context: RequestContext<RoleServer>,
     ) -> Result<Json<tools::history::FileHistoryResult>, String> {
-        self.run_watched(context, move |r, w| {
+        self.run_watched(self.repo(repo)?, context, move |r, w| {
             tools::history::file_history(r, args, w)
         })
         .await
@@ -57,10 +59,10 @@ impl GitServer {
     #[tool(annotations(title = "Search commits", read_only_hint = true))]
     async fn search_commits(
         &self,
-        Parameters(args): Parameters<tools::history::SearchCommitsArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::history::SearchCommitsArgs>>,
         context: RequestContext<RoleServer>,
     ) -> Result<Json<tools::history::SearchCommitsResult>, String> {
-        self.run_watched(context, move |r, w| {
+        self.run_watched(self.repo(repo)?, context, move |r, w| {
             tools::history::search_commits(r, args, w)
         })
         .await
@@ -72,9 +74,9 @@ impl GitServer {
     #[tool(annotations(title = "Notes", read_only_hint = true))]
     async fn notes(
         &self,
-        Parameters(args): Parameters<tools::notes::NotesArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::notes::NotesArgs>>,
     ) -> Result<Json<tools::notes::NotesResult>, String> {
-        self.repo
+        self.repo(repo)?
             .run(move |r| tools::notes::notes(r, args))
             .await
             .map(Json)

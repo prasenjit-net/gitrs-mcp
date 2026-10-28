@@ -10,6 +10,7 @@ mod history;
 mod progress;
 mod prompts;
 mod repo;
+mod repos;
 mod resources;
 mod setup;
 mod watch;
@@ -25,7 +26,7 @@ use rmcp::{
         SubscriptionFilter, UnsubscribeRequestParams,
     },
     prompt_handler,
-    service::{RequestContext, SubscriptionContext},
+    service::{NotificationContext, RequestContext, SubscriptionContext},
     tool_handler,
 };
 
@@ -42,7 +43,7 @@ pub struct Policy {
 
 #[derive(Clone)]
 pub struct GitServer {
-    repo: RepoHandle,
+    repos: std::sync::Arc<repos::Repos>,
     policy: Policy,
     tool_router: ToolRouter<Self>,
     prompt_router: PromptRouter<Self>,
@@ -50,7 +51,15 @@ pub struct GitServer {
 }
 
 impl GitServer {
+    /// A server for one repository.
+    #[cfg(test)]
     pub fn new(repo: RepoHandle, policy: Policy) -> Self {
+        Self::serving(vec![repo], policy)
+    }
+
+    /// A server for `repos`, the first being the default when a call names no repository.
+    pub fn serving(repos: Vec<RepoHandle>, policy: Policy) -> Self {
+        let repos = std::sync::Arc::new(repos::Repos::new(repos));
         let mut tool_router = Self::repo_router()
             + Self::changes_router()
             + Self::files_router()
@@ -62,14 +71,52 @@ impl GitServer {
         }
         let watcher = policy
             .watch_interval
-            .map(|interval| watch::Watcher::new(repo.clone(), interval));
+            .map(|interval| watch::Watcher::new(repos.clone(), interval));
         Self {
-            repo,
+            repos,
             policy,
             tool_router,
             prompt_router: Self::prompts_router(),
             watcher,
         }
+    }
+}
+
+impl GitServer {
+    /// The served repository a call's `repo` argument names (the default when `None`).
+    fn repo(&self, name: Option<String>) -> Result<RepoHandle, String> {
+        self.repos.select(name.as_deref())
+    }
+
+    /// Serve the repositories at the client's MCP roots, when it declares any. The request runs on
+    /// its own task: notification handlers run inside the message loop, which has to stay free to
+    /// receive the client's answer.
+    // Roots are deprecated by protocol 2026-07-28, but the clients in use today declare them, and
+    // it's how they tell a server which projects are open.
+    #[allow(deprecated)]
+    fn refresh_roots(&self, peer: rmcp::Peer<RoleServer>) {
+        let declares_roots = peer
+            .peer_info()
+            .is_some_and(|info| info.capabilities.roots.is_some());
+        if !declares_roots {
+            return;
+        }
+        let repos = self.repos.clone();
+        tokio::spawn(async move {
+            let listed = peer.list_roots().await;
+            let uris: Vec<String> = match listed {
+                Ok(listed) => listed.roots.into_iter().map(|root| root.uri).collect(),
+                Err(err) => {
+                    tracing::info!(%err, "could not list the client's roots");
+                    return;
+                }
+            };
+            if let Ok(handles) =
+                tokio::task::spawn_blocking(move || repos::repos_at_roots(&uris)).await
+            {
+                repos.set_roots(handles);
+            }
+        });
     }
 }
 
@@ -153,6 +200,14 @@ impl ServerHandler for GitServer {
     async fn listen(&self, context: SubscriptionContext) -> Result<(), McpError> {
         self.listen_stream(context).await
     }
+
+    async fn on_initialized(&self, context: NotificationContext<RoleServer>) {
+        self.refresh_roots(context.peer);
+    }
+
+    async fn on_roots_list_changed(&self, context: NotificationContext<RoleServer>) {
+        self.refresh_roots(context.peer);
+    }
 }
 
 impl GitServer {
@@ -165,6 +220,12 @@ impl GitServer {
              changes, `grep` to find code, `log` or `search_commits` for history, `blame` or `file_history` \
              for where code came from, and `merge_preview` before merging.",
         );
+        if !self.repos.is_single() {
+            text.push_str(
+                " Several repositories are served: `list_repos` names them, and every tool, prompt \
+                 and resource takes an optional `repo` (resources as `?repo=<name>`) to pick one.",
+            );
+        }
         if self.policy.allow_write {
             text.push_str(
                 " Write tools are enabled. They refuse instead of overwriting work, destructive ones \
@@ -322,7 +383,11 @@ mod tests {
         let (dir, _) = fixture_repo();
         let client = watching(dir.path(), (), true).await;
         let filter = SubscriptionFilter::builder()
-            .resource_subscriptions(["gitrs://commit/HEAD".to_owned(), "nope".to_owned()])
+            .resource_subscriptions([
+                "gitrs://commit/HEAD".to_owned(),
+                "nope".to_owned(),
+                "gitrs://commit/HEAD?repo=not-served".to_owned(),
+            ])
             .build();
         let mut stream = client.listen(filter).await.unwrap();
         assert_eq!(
@@ -417,15 +482,207 @@ mod tests {
         allow_write: bool,
         handler: C,
     ) -> rmcp::service::RunningService<rmcp::RoleClient, C> {
+        connect_to(server(path, allow_write), handler).await
+    }
+
+    /// A client for `server`, with `handler` receiving its notifications and requests.
+    async fn connect_to<C: rmcp::ClientHandler>(
+        server: GitServer,
+        handler: C,
+    ) -> rmcp::service::RunningService<rmcp::RoleClient, C> {
         use rmcp::ServiceExt;
         let (server_side, client_side) = tokio::io::duplex(1 << 16);
-        let server = server(path, allow_write);
         tokio::spawn(async move {
             let running = server.serve(server_side).await?;
             running.waiting().await?;
             anyhow::Ok(())
         });
         handler.serve(client_side).await.expect("client connects")
+    }
+
+    fn plain_policy() -> Policy {
+        Policy {
+            allow_write: false,
+            watch_interval: None,
+        }
+    }
+
+    /// The text of a tool result's first content block.
+    fn text_of(result: &rmcp::model::CallToolResult) -> String {
+        serde_json::to_value(&result.content).unwrap()[0]["text"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    }
+
+    fn call(name: &str, arguments: serde_json::Value) -> rmcp::model::CallToolRequestParams {
+        let arguments = arguments.as_object().cloned().unwrap_or_default();
+        rmcp::model::CallToolRequestParams::new(name.to_owned()).with_arguments(arguments)
+    }
+
+    #[tokio::test]
+    async fn several_repositories_over_the_protocol() {
+        use crate::tools::testutil::{run_git, write};
+        use rmcp::model::{
+            ArgumentInfo, CompleteRequestParams, GetPromptRequestParams, ReadResourceRequestParams,
+            Reference,
+        };
+        let (first, _) = fixture_repo();
+        let (second, _) = fixture_repo();
+        write(second.path(), "only-here.txt", "second\n");
+        run_git(second.path(), &["add", "only-here.txt"]);
+        run_git(second.path(), &["commit", "-q", "-m", "only in the second"]);
+        let server = GitServer::serving(
+            vec![
+                RepoHandle::open_isolated(first.path()),
+                RepoHandle::open_isolated(second.path()),
+            ],
+            plain_policy(),
+        );
+        assert!(server.instructions().contains("list_repos"));
+        let client = connect_to(server, ()).await;
+        let listed = client
+            .call_tool(call("list_repos", serde_json::json!({})))
+            .await
+            .unwrap();
+        let repos = listed.structured_content.unwrap()["repos"].clone();
+        let name = repos[1]["name"].as_str().unwrap().to_owned();
+        assert_eq!(repos[0]["default"], true);
+
+        let summary = |result: rmcp::model::CallToolResult| {
+            result.structured_content.unwrap()["commits"][0]["summary"].clone()
+        };
+        let log = |repo: Option<&str>| {
+            let mut args = serde_json::json!({"limit": 1});
+            if let Some(repo) = repo {
+                args["repo"] = repo.into();
+            }
+            client.call_tool(call("log", args))
+        };
+        assert_eq!(summary(log(None).await.unwrap()), "second commit");
+        assert_eq!(
+            summary(log(Some(&name)).await.unwrap()),
+            "only in the second"
+        );
+        let refused = log(Some("elsewhere")).await.unwrap();
+        assert_eq!(refused.is_error, Some(true));
+        assert!(text_of(&refused).contains("list_repos"));
+
+        let uris: Vec<String> = client
+            .list_all_resources()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|r| r.uri.clone())
+            .collect();
+        assert!(
+            uris.contains(&format!("gitrs://commit/HEAD?repo={name}")),
+            "{uris:?}"
+        );
+        let templates = client.list_all_resource_templates().await.unwrap();
+        assert!(templates[0].uri_template.ends_with("{?repo}"));
+        let read = client
+            .read_resource(ReadResourceRequestParams::new(format!(
+                "gitrs://file/HEAD/only-here.txt?repo={name}"
+            )))
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(&read.contents).unwrap()[0]["text"],
+            "second\n"
+        );
+
+        let repo_names = client
+            .complete(CompleteRequestParams::new(
+                Reference::for_prompt("explain_history"),
+                ArgumentInfo::new("repo", ""),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(repo_names.completion.values.len(), 2);
+
+        let mut arguments = serde_json::Map::new();
+        arguments.insert("path".into(), "only-here.txt".into());
+        arguments.insert("repo".into(), name.clone().into());
+        let prompt = client
+            .get_prompt(GetPromptRequestParams::new("explain_history").with_arguments(arguments))
+            .await
+            .unwrap();
+        let text = serde_json::to_value(&prompt.messages).unwrap()[0]["content"]["text"].clone();
+        assert!(text.as_str().unwrap().contains("only in the second"));
+        client.cancel().await.unwrap();
+    }
+
+    /// A client whose MCP roots are the directories in `.0`.
+    #[derive(Clone, Default)]
+    struct RootsClient(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
+
+    // Roots are deprecated by protocol 2026-07-28; this client declares them like today's clients.
+    #[allow(deprecated)]
+    impl rmcp::ClientHandler for RootsClient {
+        async fn list_roots(
+            &self,
+            _context: rmcp::service::RequestContext<rmcp::RoleClient>,
+        ) -> Result<rmcp::model::ListRootsResult, McpError> {
+            let roots = self
+                .0
+                .lock()
+                .unwrap()
+                .iter()
+                .map(rmcp::model::Root::new)
+                .collect();
+            Ok(rmcp::model::ListRootsResult::new(roots))
+        }
+
+        fn get_info(&self) -> rmcp::model::ClientConfig {
+            let capabilities = rmcp::model::ClientCapabilities::builder()
+                .enable_roots()
+                .enable_roots_list_changed()
+                .build();
+            rmcp::model::ClientConfig::new(
+                capabilities,
+                rmcp::model::Implementation::new("roots-client", "0"),
+            )
+        }
+    }
+
+    #[tokio::test]
+    async fn client_roots_are_served_and_follow_changes() {
+        let (served, _) = fixture_repo();
+        let (other, _) = fixture_repo();
+        let roots = RootsClient::default();
+        roots.0.lock().unwrap().push(repos::file_uri(other.path()));
+        let client = connect_to(
+            GitServer::serving(
+                vec![RepoHandle::open_isolated(served.path())],
+                plain_policy(),
+            ),
+            roots.clone(),
+        )
+        .await;
+        let count = || async {
+            let listed = client
+                .call_tool(call("list_repos", serde_json::json!({})))
+                .await;
+            listed.unwrap().structured_content.unwrap()["repos"]
+                .as_array()
+                .unwrap()
+                .len()
+        };
+        let wait_for = |n: usize| async move {
+            for _ in 0..200 {
+                if count().await == n {
+                    return true;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            false
+        };
+        assert!(wait_for(2).await, "the root's repository is added");
+        roots.0.lock().unwrap().clear();
+        client.notify_roots_list_changed().await.unwrap();
+        assert!(wait_for(1).await, "and dropped when the roots change");
+        client.cancel().await.unwrap();
     }
 
     /// A client that records the progress notifications it receives.

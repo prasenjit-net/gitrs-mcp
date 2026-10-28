@@ -12,35 +12,56 @@ use rmcp::{
     },
 };
 
-use super::GitServer;
+use super::{
+    GitServer,
+    repos::{split_repo, with_repo},
+};
 use crate::tools::resources::{self, Body};
 
 impl GitServer {
+    /// The fixed resources of every served repository; those of other repositories than the
+    /// default carry `?repo=<name>`.
     pub(super) async fn resource_list(&self) -> Result<ListResourcesResult, McpError> {
-        let fixed = self
-            .repo
-            .run(|r| Ok(resources::fixed(r)))
-            .await
-            .map_err(|e| McpError::internal_error(e, None))?;
-        let listed = fixed
-            .into_iter()
-            .map(|r| {
-                Resource::new(r.uri, r.name)
-                    .with_title(r.title)
-                    .with_description(r.description)
-                    .with_mime_type(r.mime_type)
-            })
-            .collect();
+        let mut listed = Vec::new();
+        for (index, (name, handle)) in self.repos.entries().into_iter().enumerate() {
+            let fixed = handle
+                .run(|r| Ok(resources::fixed(r)))
+                .await
+                .map_err(|e| McpError::internal_error(e, None))?;
+            let repo = (index > 0).then_some(name.as_str());
+            for r in fixed {
+                let (resource_name, title) = match repo {
+                    Some(repo) => (
+                        format!("{}-{repo}", r.name),
+                        format!("{} ({repo})", r.title),
+                    ),
+                    None => (r.name.to_owned(), r.title.to_owned()),
+                };
+                listed.push(
+                    Resource::new(with_repo(r.uri, repo), resource_name)
+                        .with_title(title)
+                        .with_description(r.description)
+                        .with_mime_type(r.mime_type),
+                );
+            }
+        }
         Ok(ListResourcesResult::with_all_items(listed))
     }
 
+    /// The templates, each taking an optional `?repo=<name>` for another served repository.
     pub(super) fn resource_templates(&self) -> ListResourceTemplatesResult {
         let templates = resources::TEMPLATES
             .iter()
             .map(|t| {
-                let template = ResourceTemplate::new(t.uri_template, t.name)
-                    .with_title(t.title)
-                    .with_description(t.description);
+                let template = ResourceTemplate::new(
+                    format!("{}{{?repo}}", t.uri_template),
+                    t.name,
+                )
+                .with_title(t.title)
+                .with_description(format!(
+                    "{} Add `?repo=<name>` to read from another served repository (list_repos).",
+                    t.description
+                ));
                 match t.mime_type {
                     Some(mime) => template.with_mime_type(mime),
                     None => template,
@@ -51,12 +72,15 @@ impl GitServer {
     }
 
     pub(super) async fn resource_read(&self, uri: String) -> Result<ReadResourceResult, McpError> {
-        let request = uri.clone();
+        let not_found = |e| McpError::resource_not_found(e, None);
+        let (base, repo) = split_repo(&uri).map_err(not_found)?;
+        let request = base.to_owned();
         let contents = self
-            .repo
+            .repo(repo)
+            .map_err(not_found)?
             .run(move |r| resources::read(r, &request))
             .await
-            .map_err(|e| McpError::resource_not_found(e, None))?;
+            .map_err(not_found)?;
         let content = match contents.body {
             Body::Text(text) => ResourceContents::text(text, uri),
             Body::Base64(data) => ResourceContents::blob(data, uri),
@@ -66,7 +90,8 @@ impl GitServer {
     }
 
     /// Completion is a typing aid, so a context that doesn't resolve (a revision still being typed)
-    /// gives no values rather than an error.
+    /// gives no values rather than an error. `repo` completes from the served repositories, and a
+    /// `repo` in the context picks the repository other arguments complete in.
     pub(super) async fn completion(&self, request: CompleteRequestParams) -> CompleteResult {
         let name = request.argument.name;
         let value = request.argument.value;
@@ -74,11 +99,17 @@ impl GitServer {
             .context
             .and_then(|c| c.arguments)
             .unwrap_or_default();
-        let found = self
-            .repo
-            .run(move |r| resources::complete(r, &name, &value, &context))
-            .await
-            .unwrap_or_default();
+        let found = if name == "repo" {
+            resources::matching(self.repos.names(), &value)
+        } else {
+            match self.repo(context.get("repo").cloned()) {
+                Ok(handle) => handle
+                    .run(move |r| resources::complete(r, &name, &value, &context))
+                    .await
+                    .unwrap_or_default(),
+                Err(_) => resources::Completion::default(),
+            }
+        };
         let has_more = found.total > found.values.len();
         let total = u32::try_from(found.total).ok();
         let info =

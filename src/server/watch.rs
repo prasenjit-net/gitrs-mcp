@@ -19,11 +19,12 @@ use rmcp::{
 use tokio::sync::broadcast;
 
 use super::GitServer;
-use crate::{repo::RepoHandle, tools::resources};
+use super::repos::{Repos, split_repo};
+use crate::tools::resources;
 
 /// Subscribed URIs and the state of the polling task, shared by every clone of the server.
 pub(super) struct Watcher {
-    repo: RepoHandle,
+    repos: Arc<Repos>,
     interval: Duration,
     /// Subscribed URIs with how many subscriptions name each, and the fingerprint last seen.
     watched: Mutex<HashMap<String, (usize, u64)>>,
@@ -42,9 +43,9 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 impl Watcher {
-    pub(super) fn new(repo: RepoHandle, interval: Duration) -> Arc<Self> {
+    pub(super) fn new(repos: Arc<Repos>, interval: Duration) -> Arc<Self> {
         Arc::new(Self {
-            repo,
+            repos,
             interval,
             watched: Mutex::default(),
             legacy: Mutex::default(),
@@ -55,22 +56,23 @@ impl Watcher {
 
     /// Start watching `uri` (once more), taking its current fingerprint as the baseline.
     async fn watch(self: &Arc<Self>, uri: &str) -> Result<(), McpError> {
-        resources::Address::parse(uri)
+        let (base, repo) = split_repo(uri).map_err(|e| McpError::invalid_params(e, None))?;
+        resources::Address::parse(base)
             .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
-        let request = uri.to_owned();
-        let print = self
-            .repo
-            .run(move |r| Ok(resources::fingerprint(r, &request)))
+        self.repos
+            .select(repo.as_deref())
+            .map_err(|e| McpError::invalid_params(e, None))?;
+        let (repos, request) = (self.repos.clone(), uri.to_owned());
+        let print = tokio::task::spawn_blocking(move || fingerprint(&repos, &request))
             .await
-            .map_err(|e| McpError::internal_error(e, None))?;
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
         self.record(uri, print);
         Ok(())
     }
 
-    /// Like [`Self::watch`], on the calling thread, for a URI already known to parse.
+    /// Like [`Self::watch`], on the calling thread, for a URI already known to be valid.
     fn watch_now(self: &Arc<Self>, uri: &str) {
-        let print = self.repo.run_now(|r| resources::fingerprint(r, uri));
-        self.record(uri, print);
+        self.record(uri, fingerprint(&self.repos, uri));
     }
 
     fn record(self: &Arc<Self>, uri: &str, print: u64) {
@@ -109,18 +111,16 @@ impl Watcher {
         if uris.is_empty() {
             return;
         }
-        let Ok(prints) = self
-            .repo
-            .run(move |r| {
-                Ok(uris
-                    .into_iter()
-                    .map(|uri| {
-                        let print = resources::fingerprint(r, &uri);
-                        (uri, print)
-                    })
-                    .collect::<Vec<_>>())
-            })
-            .await
+        let repos = self.repos.clone();
+        let Ok(prints) = tokio::task::spawn_blocking(move || {
+            uris.into_iter()
+                .map(|uri| {
+                    let print = fingerprint(&repos, &uri);
+                    (uri, print)
+                })
+                .collect::<Vec<_>>()
+        })
+        .await
         else {
             return;
         };
@@ -158,6 +158,22 @@ impl Watcher {
             if let Err(err) = peer.notify_resource_updated(note).await {
                 tracing::debug!(%uri, %err, "could not send a resource update");
             }
+        }
+    }
+}
+
+/// The fingerprint of `uri` in the repository its `?repo=` names. A repository that stopped being
+/// served (a client root removed) fingerprints its error, so that counts as a change.
+fn fingerprint(repos: &Repos, uri: &str) -> u64 {
+    let located =
+        split_repo(uri).and_then(|(base, repo)| Ok((base, repos.select(repo.as_deref())?)));
+    match located {
+        Ok((base, handle)) => handle.run_now(|r| resources::fingerprint(r, base)),
+        Err(err) => {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::hash::DefaultHasher::new();
+            err.hash(&mut hasher);
+            hasher.finish()
         }
     }
 }
@@ -231,7 +247,12 @@ impl GitServer {
             .resource_subscriptions
             .iter()
             .flatten()
-            .filter(|uri| resources::Address::parse(uri).is_ok())
+            .filter(|uri| {
+                split_repo(uri).is_ok_and(|(base, repo)| {
+                    resources::Address::parse(base).is_ok()
+                        && self.repos.select(repo.as_deref()).is_ok()
+                })
+            })
             .cloned()
             .collect();
         for uri in &uris {

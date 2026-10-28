@@ -8,10 +8,11 @@ It lets AI assistants inspect a Git repository through typed tools with structur
 - **Read-only by default.** Write tools exist only when you start the server with `--allow-write`; without it they aren't even listed. They check everything before writing, refuse instead of overwriting work, and default to a dry run when data could be lost.
 - **Git-compatible.** Results match the `git` CLI on the same repository: the test suite checks each tool against real `git` output, and generated patches apply with `git apply`.
 - **Structured output.** Every tool returns JSON with a published output schema. Bad input, such as an unknown revision, comes back as a tool error the model can read and correct.
+- **Several repositories.** Repeat `--repo`, or let the client's MCP roots add its open projects. Every tool, prompt and resource takes an optional `repo` to pick one.
 - **Context to attach.** Commits, files and diffs are also served as `gitrs://` resources (for example the staged changes), with completion of revisions and paths. Prompts such as `write_commit_message` and `review_changes` come filled in with the diff they need.
 - **Pure Rust.** It runs as a single static binary that speaks MCP over stdio, and it doesn't need `libgit2` or the `git` executable.
 
-> **Status:** early development. Phases 0–4 of the [roadmap](ROADMAP.md) are done: 27 read-only tools covering status, diffs, merge previews and conflicts, file contents, code search, ignore and attribute rules, history, blame, refs, tags, reflogs, stashes, notes, worktrees, submodules, config and object stats; and, with `--allow-write`, 22 write tools for the local edit, stage, commit and branch loop, plus merges, cherry-picks, reverts, rebases, stashes, hard resets, `clean` and worktrees. Merges and rebases that stop on conflicts leave git's own state, so you can finish them with either gitrs-mcp or git.
+> **Status:** early development. Phases 0–4 of the [roadmap](ROADMAP.md) are done: 28 read-only tools covering status, diffs, merge previews and conflicts, file contents, code search, ignore and attribute rules, history, blame, refs, tags, reflogs, stashes, notes, worktrees, submodules, config and object stats; and, with `--allow-write`, 22 write tools for the local edit, stage, commit and branch loop, plus merges, cherry-picks, reverts, rebases, stashes, hard resets, `clean` and worktrees. Merges and rebases that stop on conflicts leave git's own state, so you can finish them with either gitrs-mcp or git.
 
 ## Install
 
@@ -33,7 +34,8 @@ make install          # cargo install --path . --locked
 gitrs-mcp [OPTIONS]
 
 Options:
-  -r, --repo <REPO>  Repository to serve; any path inside a worktree works (default: .)
+  -r, --repo <REPO>  Repository to serve; any path inside a worktree works (default: .).
+                     Repeat to serve several; the first is the default
       --allow-write  Enable tools that modify the repository
       --watch        Notify clients when subscribed gitrs:// resources change
   -h, --help         Print help
@@ -93,6 +95,7 @@ Revision arguments accept anything `git rev-parse` does: SHAs and SHA prefixes, 
 | `reflog` | `ref?` (default `HEAD`), `limit?`, `skip?` | Where the ref pointed over time: `ref@{n}` selector, old and new commit, committer, message |
 | `list_stashes` | `limit?`, `skip?` | Stashes newest first: `stash@{n}`, commit, base commit, branch, message, untracked flag |
 | `notes` | `rev?`, `ref?`, `max_bytes?` | Notes attached to a commit or object, per notes ref |
+| `list_repos` | none | The served repositories (from `--repo` and the client's MCP roots) and their names for the `repo` argument |
 | `repo_info` | none | git dir, worktree, bare/shallow flags, current branch, HEAD commit, in-progress operation (merge, rebase, …) |
 | `list_worktrees` | `limit?`, `skip?` | Main and linked worktrees: path, HEAD, branch, locked/prunable, which one is served |
 | `list_submodules` | `limit?`, `skip?` | Submodules with URL (passwords redacted), recorded and checked-out commits, and state, like `git submodule status` |
@@ -156,8 +159,8 @@ Contributor rules (code quality, MCP documentation, testing and the pre-commit c
 ```
 src/
 ├─ main.rs          CLI arguments, logging, stdio transport
-├─ server/          MCP registration: thin async wrappers, one router per area, plus resources, prompts and completion
-├─ repo.rs          Thread-safe repo handle; runs gix calls on the blocking pool
+├─ server/          MCP registration: thin async wrappers, one router per area, resources, prompts, completion, and the served repositories
+├─ repo.rs          Thread-safe repository handles; runs gix calls on the blocking pool
 └─ tools/           Git logic as plain sync functions over &gix::Repository
    ├─ mod.rs        shared types and helpers, test fixtures
    ├─ repo.rs       repo_info

@@ -28,6 +28,8 @@ All three are read-only and available with or without `--allow-write`. With `--w
 | `gitrs://file/{rev}/{+path}` | `text/plain`, or `application/octet-stream` for binary files | A file's content |
 | `gitrs://diff/{from}..{to}` | `text/x-diff` | A unified diff, like `git diff` |
 
+**Several repositories.** Each template ends in `{?repo}`: add `?repo=<name>`, using a name from [`list_repos`](tools.md#list_repos), to read from a served repository other than the default. For example, `gitrs://commit/HEAD?repo=api` reads `api`'s HEAD commit. When several repositories are served, the listed resources of the others carry their `?repo=`.
+
 **Revisions** (`rev`, `from`, `to`) accept anything `git rev-parse` would: branches, tags, SHAs and expressions such as `HEAD~2`. Percent-encode a `/` inside a revision as `%2F`, so branch `topic/x` is `gitrs://commit/topic%2Fx`.
 
 - **`commit`**
@@ -139,7 +141,7 @@ A URI that becomes readable or unreadable, such as a revision that starts or sto
 
 ## Prompts
 
-`prompts/list` returns three prompts. `prompts/get` returns one user message with the instructions and the data filled in. Code and diffs are inside Markdown code fences, which are longer than any backtick run in the content. Prompt arguments are strings, as MCP defines them.
+`prompts/list` returns three prompts. Each also takes an optional `repo` argument, which picks the served repository. `prompts/get` returns one user message with the instructions and the data filled in. Code and diffs are inside Markdown code fences, which are longer than any backtick run in the content. Prompt arguments are strings, as MCP defines them.
 
 | Prompt | Arguments | Fills in |
 |---|---|---|
@@ -231,9 +233,10 @@ Run against the demo repository from `scripts/demo-repo.sh`, which has `src/main
 | `rev` | `HEAD`, branches, remote branches and tags, plus `index` and `worktree` |
 | `from` | the same, plus `index` |
 | `to` | the same, plus `index` and `worktree` |
+| `repo` | names of the served repositories |
 | `path` | entries of the directory typed so far, at `rev` (or `from`) from the request's context, default `HEAD`; directories end in `/`. With `index` or `worktree`, tracked paths from the index. |
 
-A context revision that doesn't resolve, such as one still being typed, gives no suggestions rather than an error.
+A `repo` in the request's context picks the repository that revisions and paths complete in. A context revision that doesn't resolve, such as one still being typed, gives no suggestions rather than an error.
 
 ### Examples
 

@@ -14,7 +14,10 @@ use rmcp::{RoleServer, model::ProgressNotificationParam, service::RequestContext
 use tokio::sync::{mpsc, oneshot};
 
 use super::GitServer;
-use crate::tools::progress::{Progress, Watch};
+use crate::{
+    repo::RepoHandle,
+    tools::progress::{Progress, Watch},
+};
 
 /// Least time between two progress notifications for one request.
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(250);
@@ -24,6 +27,7 @@ impl GitServer {
     /// are all sent before this returns, so they reach the client ahead of the result.
     pub(super) async fn run_watched<T, F>(
         &self,
+        repo: RepoHandle,
         context: RequestContext<RoleServer>,
         f: F,
     ) -> Result<T, String>
@@ -69,7 +73,7 @@ impl GitServer {
         };
 
         let watch = Watch::new(cancelled, PROGRESS_INTERVAL, reporter);
-        let result = self.repo.run(move |r| f(r, &watch)).await;
+        let result = repo.run(move |r| f(r, &watch)).await;
         drop(finished);
         // The watch (and with it the sender) is gone, so the forwarder ends once it has sent the rest.
         if let Some(forwarder) = forwarder {

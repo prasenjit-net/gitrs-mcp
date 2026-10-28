@@ -1,35 +1,52 @@
-//! Shared repository handle and the sync→async bridge for gix calls.
+//! Repository handles and the sync→async bridge for gix calls.
 
-use std::path::Path;
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use anyhow::Context;
 
-/// A thread-safe handle to the served repository.
+/// A thread-safe handle to one served repository.
 ///
 /// gix is synchronous and `gix::Repository` is `!Sync`, so every tool call runs
 /// on the blocking pool with its own thread-local repository instance.
 #[derive(Clone)]
 pub struct RepoHandle {
     repo: gix::ThreadSafeRepository,
+    root: Arc<PathBuf>,
 }
 
 impl RepoHandle {
-    /// Find the repository containing `path` and make its root the process working directory.
-    ///
-    /// gix resolves pathspecs against the working directory captured when a repository is opened.
-    /// Tool arguments are documented as relative to the repository root, so a server launched from a
-    /// subdirectory would otherwise silently shift every path. Changing directory and reopening keeps
-    /// them root-relative.
-    pub fn discover(path: &Path) -> anyhow::Result<Self> {
-        let found = gix::ThreadSafeRepository::discover(path)?;
-        // Discovery can return a relative root such as `..`; make it absolute before moving into it.
+    /// The root of the repository containing `path` (searching parent directories like git): its
+    /// working tree, or the git directory of a bare repository. Absolute and canonical.
+    pub fn find_root(path: &Path) -> anyhow::Result<PathBuf> {
+        let found = gix::ThreadSafeRepository::discover(path)
+            .with_context(|| format!("no git repository found at or above {}", path.display()))?;
+        // Discovery can return a relative root such as `..`.
         let root = found.work_dir().unwrap_or_else(|| found.git_dir());
-        let root = std::fs::canonicalize(root)
-            .with_context(|| format!("cannot resolve repository root {}", root.display()))?;
-        std::env::set_current_dir(&root)
-            .with_context(|| format!("cannot change directory to {}", root.display()))?;
+        std::fs::canonicalize(root)
+            .with_context(|| format!("cannot resolve repository root {}", root.display()))
+    }
+
+    /// Make the filesystem root the process working directory, before any repository is opened.
+    ///
+    /// gix resolves pathspecs against the working directory captured when a repository is opened,
+    /// relative to the working tree when it's inside one. Tool arguments are documented as relative
+    /// to the repository root, so a server launched from a subdirectory would silently shift every
+    /// path. From outside every working tree, each repository resolves paths from its own root.
+    pub fn leave_worktrees(near: &Path) -> anyhow::Result<()> {
+        let top = near.ancestors().last().unwrap_or(near);
+        std::env::set_current_dir(top)
+            .with_context(|| format!("cannot change directory to {}", top.display()))
+    }
+
+    /// Open the repository whose root is `root` (from [`Self::find_root`]).
+    pub fn open(root: PathBuf) -> anyhow::Result<Self> {
         Ok(Self {
-            repo: gix::ThreadSafeRepository::open(&root)?,
+            repo: gix::ThreadSafeRepository::open(&root)
+                .with_context(|| format!("cannot open the repository at {}", root.display()))?,
+            root: Arc::new(root),
         })
     }
 
@@ -40,11 +57,21 @@ impl RepoHandle {
         Self {
             repo: gix::ThreadSafeRepository::open_opts(path, gix::open::Options::isolated())
                 .expect("test repository opens"),
+            root: Arc::new(std::fs::canonicalize(path).expect("test repository path resolves")),
         }
+    }
+
+    /// The repository's root, as found by [`Self::find_root`].
+    pub fn root(&self) -> &Path {
+        &self.root
     }
 
     pub fn git_dir(&self) -> &Path {
         self.repo.git_dir()
+    }
+
+    pub fn is_bare(&self) -> bool {
+        self.repo.work_dir().is_none()
     }
 
     /// Run `f` against the repository on the calling thread, for quick work in a synchronous
@@ -67,5 +94,34 @@ impl RepoHandle {
             .await
             .map_err(|e| format!("internal error: {e}"))?
             .map_err(|e| format!("{e:#}"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tools::testutil::{bare_repo, fixture_repo};
+
+    #[test]
+    fn roots_are_found_from_inside_and_opened() {
+        let (dir, _) = fixture_repo();
+        let sub = dir.path().join("deep/er");
+        std::fs::create_dir_all(&sub).unwrap();
+        let root = RepoHandle::find_root(&sub).unwrap();
+        assert_eq!(root, std::fs::canonicalize(dir.path()).unwrap());
+        let handle = RepoHandle::open(root.clone()).unwrap();
+        assert_eq!(handle.root(), root);
+        assert!(!handle.is_bare());
+        assert!(handle.git_dir().ends_with(".git"));
+
+        let (_bare_dir, bare) = bare_repo();
+        let bare_root = RepoHandle::find_root(bare.git_dir()).unwrap();
+        assert_eq!(bare_root, std::fs::canonicalize(bare.git_dir()).unwrap());
+        assert!(RepoHandle::open(bare_root).unwrap().is_bare());
+
+        let elsewhere = tempfile::tempdir().unwrap();
+        let err = RepoHandle::find_root(elsewhere.path()).unwrap_err();
+        assert!(err.to_string().contains("no git repository found"), "{err}");
+        assert!(RepoHandle::open(elsewhere.path().to_owned()).is_err());
     }
 }

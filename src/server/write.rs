@@ -5,7 +5,10 @@ use rmcp::{
     tool, tool_router,
 };
 
-use super::GitServer;
+use super::{
+    GitServer,
+    repos::{InRepo, RepoOnly},
+};
 use crate::tools;
 
 #[tool_router(router = write_router, vis = "pub(super)")]
@@ -20,9 +23,9 @@ impl GitServer {
     ))]
     async fn create_branch(
         &self,
-        Parameters(args): Parameters<tools::branches::CreateBranchArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::branches::CreateBranchArgs>>,
     ) -> Result<Json<tools::branches::BranchResult>, String> {
-        self.repo
+        self.repo(repo)?
             .run(move |r| tools::branches::create_branch(r, args))
             .await
             .map(Json)
@@ -39,9 +42,9 @@ impl GitServer {
     ))]
     async fn delete_branch(
         &self,
-        Parameters(args): Parameters<tools::branches::DeleteBranchArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::branches::DeleteBranchArgs>>,
     ) -> Result<Json<tools::branches::DeleteBranchResult>, String> {
-        self.repo
+        self.repo(repo)?
             .run(move |r| tools::branches::delete_branch(r, args))
             .await
             .map(Json)
@@ -57,9 +60,9 @@ impl GitServer {
     ))]
     async fn rename_branch(
         &self,
-        Parameters(args): Parameters<tools::branches::RenameBranchArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::branches::RenameBranchArgs>>,
     ) -> Result<Json<tools::branches::RenameBranchResult>, String> {
-        self.repo
+        self.repo(repo)?
             .run(move |r| tools::branches::rename_branch(r, args))
             .await
             .map(Json)
@@ -76,9 +79,9 @@ impl GitServer {
     ))]
     async fn create_tag(
         &self,
-        Parameters(args): Parameters<tools::branches::CreateTagArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::branches::CreateTagArgs>>,
     ) -> Result<Json<tools::refs::ShowTagResult>, String> {
-        self.repo
+        self.repo(repo)?
             .run(move |r| tools::branches::create_tag(r, args))
             .await
             .map(Json)
@@ -96,9 +99,9 @@ impl GitServer {
     ))]
     async fn stage(
         &self,
-        Parameters(args): Parameters<tools::staging::StageArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::staging::StageArgs>>,
     ) -> Result<Json<tools::staging::IndexUpdateResult>, String> {
-        self.repo
+        self.repo(repo)?
             .run(move |r| tools::staging::stage(r, args))
             .await
             .map(Json)
@@ -114,9 +117,9 @@ impl GitServer {
     ))]
     async fn unstage(
         &self,
-        Parameters(args): Parameters<tools::staging::UnstageArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::staging::UnstageArgs>>,
     ) -> Result<Json<tools::staging::IndexUpdateResult>, String> {
-        self.repo
+        self.repo(repo)?
             .run(move |r| tools::staging::unstage(r, args))
             .await
             .map(Json)
@@ -134,9 +137,9 @@ impl GitServer {
     ))]
     async fn commit(
         &self,
-        Parameters(args): Parameters<tools::commit::CommitArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::commit::CommitArgs>>,
     ) -> Result<Json<tools::commit::CommitResult>, String> {
-        self.repo
+        self.repo(repo)?
             .run(move |r| tools::commit::commit(r, args))
             .await
             .map(Json)
@@ -154,9 +157,9 @@ impl GitServer {
     ))]
     async fn reset(
         &self,
-        Parameters(args): Parameters<tools::commit::ResetArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::commit::ResetArgs>>,
     ) -> Result<Json<tools::commit::ResetResult>, String> {
-        self.repo
+        self.repo(repo)?
             .run(move |r| tools::commit::reset(r, args))
             .await
             .map(Json)
@@ -173,9 +176,9 @@ impl GitServer {
     ))]
     async fn restore(
         &self,
-        Parameters(args): Parameters<tools::checkout::RestoreArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::checkout::RestoreArgs>>,
     ) -> Result<Json<tools::checkout::RestoreResult>, String> {
-        self.repo
+        self.repo(repo)?
             .run(move |r| tools::checkout::restore(r, args))
             .await
             .map(Json)
@@ -192,9 +195,9 @@ impl GitServer {
     ))]
     async fn switch(
         &self,
-        Parameters(args): Parameters<tools::checkout::SwitchArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::checkout::SwitchArgs>>,
     ) -> Result<Json<tools::checkout::SwitchResult>, String> {
-        self.repo
+        self.repo(repo)?
             .run(move |r| tools::checkout::switch(r, args))
             .await
             .map(Json)
@@ -212,9 +215,9 @@ impl GitServer {
     ))]
     async fn clean(
         &self,
-        Parameters(args): Parameters<tools::clean::CleanArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::clean::CleanArgs>>,
     ) -> Result<Json<tools::clean::CleanResult>, String> {
-        self.repo
+        self.repo(repo)?
             .run(move |r| tools::clean::clean(r, args))
             .await
             .map(Json)
@@ -230,9 +233,9 @@ impl GitServer {
     ))]
     async fn stash_push(
         &self,
-        Parameters(args): Parameters<tools::stash::StashPushArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::stash::StashPushArgs>>,
     ) -> Result<Json<tools::reflog::StashEntry>, String> {
-        self.repo
+        self.repo(repo)?
             .run(move |r| tools::stash::stash_push(r, args))
             .await
             .map(Json)
@@ -249,9 +252,9 @@ impl GitServer {
     ))]
     async fn stash_pop(
         &self,
-        Parameters(args): Parameters<tools::stash::StashPopArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::stash::StashPopArgs>>,
     ) -> Result<Json<tools::stash::StashPopResult>, String> {
-        self.repo
+        self.repo(repo)?
             .run(move |r| tools::stash::stash_pop(r, args))
             .await
             .map(Json)
@@ -267,9 +270,9 @@ impl GitServer {
     ))]
     async fn stash_drop(
         &self,
-        Parameters(args): Parameters<tools::stash::StashDropArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::stash::StashDropArgs>>,
     ) -> Result<Json<tools::stash::StashDropResult>, String> {
-        self.repo
+        self.repo(repo)?
             .run(move |r| tools::stash::stash_drop(r, args))
             .await
             .map(Json)
@@ -287,9 +290,9 @@ impl GitServer {
     ))]
     async fn merge(
         &self,
-        Parameters(args): Parameters<tools::integrate::MergeArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::integrate::MergeArgs>>,
     ) -> Result<Json<tools::integrate::OperationResult>, String> {
-        self.repo
+        self.repo(repo)?
             .run(move |r| tools::integrate::merge(r, args))
             .await
             .map(Json)
@@ -305,9 +308,9 @@ impl GitServer {
     ))]
     async fn cherry_pick(
         &self,
-        Parameters(args): Parameters<tools::integrate::PickArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::integrate::PickArgs>>,
     ) -> Result<Json<tools::integrate::OperationResult>, String> {
-        self.repo
+        self.repo(repo)?
             .run(move |r| tools::integrate::cherry_pick(r, args))
             .await
             .map(Json)
@@ -323,9 +326,9 @@ impl GitServer {
     ))]
     async fn revert(
         &self,
-        Parameters(args): Parameters<tools::integrate::PickArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::integrate::PickArgs>>,
     ) -> Result<Json<tools::integrate::OperationResult>, String> {
-        self.repo
+        self.repo(repo)?
             .run(move |r| tools::integrate::revert(r, args))
             .await
             .map(Json)
@@ -342,9 +345,9 @@ impl GitServer {
     ))]
     async fn rebase(
         &self,
-        Parameters(args): Parameters<tools::rebase::RebaseArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::rebase::RebaseArgs>>,
     ) -> Result<Json<tools::integrate::OperationResult>, String> {
-        self.repo
+        self.repo(repo)?
             .run(move |r| tools::rebase::rebase(r, args))
             .await
             .map(Json)
@@ -361,9 +364,9 @@ impl GitServer {
     ))]
     async fn continue_operation(
         &self,
-        Parameters(args): Parameters<tools::integrate::ContinueArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::integrate::ContinueArgs>>,
     ) -> Result<Json<tools::integrate::OperationResult>, String> {
-        self.repo
+        self.repo(repo)?
             .run(move |r| tools::integrate::continue_operation(r, args))
             .await
             .map(Json)
@@ -378,8 +381,11 @@ impl GitServer {
         destructive_hint = false,
         idempotent_hint = false
     ))]
-    async fn abort_operation(&self) -> Result<Json<tools::integrate::OperationResult>, String> {
-        self.repo
+    async fn abort_operation(
+        &self,
+        Parameters(RepoOnly { repo }): Parameters<RepoOnly>,
+    ) -> Result<Json<tools::integrate::OperationResult>, String> {
+        self.repo(repo)?
             .run(tools::integrate::abort_operation)
             .await
             .map(Json)
@@ -395,9 +401,9 @@ impl GitServer {
     ))]
     async fn worktree_add(
         &self,
-        Parameters(args): Parameters<tools::worktrees::WorktreeAddArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::worktrees::WorktreeAddArgs>>,
     ) -> Result<Json<tools::worktrees::WorktreeEntry>, String> {
-        self.repo
+        self.repo(repo)?
             .run(move |r| tools::worktrees::worktree_add(r, args))
             .await
             .map(Json)
@@ -413,9 +419,9 @@ impl GitServer {
     ))]
     async fn worktree_remove(
         &self,
-        Parameters(args): Parameters<tools::worktrees::WorktreeRemoveArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::worktrees::WorktreeRemoveArgs>>,
     ) -> Result<Json<tools::worktrees::WorktreeRemoveResult>, String> {
-        self.repo
+        self.repo(repo)?
             .run(move |r| tools::worktrees::worktree_remove(r, args))
             .await
             .map(Json)
@@ -426,6 +432,11 @@ impl GitServer {
 mod tests {
     use super::*;
     use crate::{repo::RepoHandle, server::Policy, tools::testutil::fixture_repo};
+
+    /// Tool arguments for the default repository.
+    fn in_default<T>(args: T) -> Parameters<InRepo<T>> {
+        Parameters(InRepo { repo: None, args })
+    }
 
     #[tokio::test]
     async fn write_wrappers_return_results_and_tool_errors() {
@@ -438,7 +449,7 @@ mod tests {
             },
         );
         let created = server
-            .create_branch(Parameters(tools::branches::CreateBranchArgs {
+            .create_branch(in_default(tools::branches::CreateBranchArgs {
                 name: "topic".into(),
                 start_point: None,
                 force: false,
@@ -448,7 +459,7 @@ mod tests {
         assert_eq!(created.0.short_name, "topic");
 
         let err = server
-            .delete_branch(Parameters(tools::branches::DeleteBranchArgs {
+            .delete_branch(in_default(tools::branches::DeleteBranchArgs {
                 name: "nope".into(),
                 force: false,
                 dry_run: true,
@@ -458,7 +469,7 @@ mod tests {
             .expect("the call is refused");
         assert!(err.contains("no branch `nope`"), "{err}");
         let err = server
-            .rename_branch(Parameters(tools::branches::RenameBranchArgs {
+            .rename_branch(in_default(tools::branches::RenameBranchArgs {
                 old: Some("topic".into()),
                 new: "main".into(),
                 force: false,
@@ -468,7 +479,7 @@ mod tests {
             .expect("the call is refused");
         assert!(err.contains("already exists"), "{err}");
         let err = server
-            .create_tag(Parameters(tools::branches::CreateTagArgs {
+            .create_tag(in_default(tools::branches::CreateTagArgs {
                 name: "v1".into(),
                 target: None,
                 message: None,
@@ -481,7 +492,7 @@ mod tests {
 
         crate::tools::testutil::write(dir.path(), "a.txt", "edited\n");
         let staged = server
-            .stage(Parameters(tools::staging::StageArgs {
+            .stage(in_default(tools::staging::StageArgs {
                 paths: vec!["a.txt".into()],
                 all: false,
             }))
@@ -489,7 +500,7 @@ mod tests {
             .unwrap();
         assert_eq!(staged.0.staged_total, 1);
         let unstaged = server
-            .unstage(Parameters(tools::staging::UnstageArgs {
+            .unstage(in_default(tools::staging::UnstageArgs {
                 paths: vec![],
                 all: true,
             }))
@@ -498,14 +509,14 @@ mod tests {
         assert_eq!(unstaged.0.staged_total, 0);
 
         server
-            .stage(Parameters(tools::staging::StageArgs {
+            .stage(in_default(tools::staging::StageArgs {
                 paths: vec![],
                 all: true,
             }))
             .await
             .unwrap();
         let committed = server
-            .commit(Parameters(tools::commit::CommitArgs {
+            .commit(in_default(tools::commit::CommitArgs {
                 message: "Through MCP".into(),
                 amend: false,
                 allow_empty: false,
@@ -515,7 +526,7 @@ mod tests {
             .unwrap();
         assert_eq!(committed.0.commit.summary, "Through MCP");
         let reset = server
-            .reset(Parameters(tools::commit::ResetArgs {
+            .reset(in_default(tools::commit::ResetArgs {
                 rev: Some("HEAD~1".into()),
                 mode: tools::commit::ResetMode::Soft,
                 dry_run: None,
@@ -525,7 +536,7 @@ mod tests {
         assert_eq!(reset.0.previous, committed.0.commit.id);
 
         let restored = server
-            .restore(Parameters(tools::checkout::RestoreArgs {
+            .restore(in_default(tools::checkout::RestoreArgs {
                 paths: vec![".".into()],
                 source: None,
                 staged: false,
@@ -536,7 +547,7 @@ mod tests {
             .unwrap();
         assert!(restored.0.dry_run);
         let switched = server
-            .switch(Parameters(tools::checkout::SwitchArgs {
+            .switch(in_default(tools::checkout::SwitchArgs {
                 target: "feature".into(),
                 create: false,
                 start_point: None,
@@ -548,7 +559,7 @@ mod tests {
 
         crate::tools::testutil::write(dir.path(), "a.txt", "to stash\n");
         let stashed = server
-            .stash_push(Parameters(tools::stash::StashPushArgs {
+            .stash_push(in_default(tools::stash::StashPushArgs {
                 message: None,
                 include_untracked: false,
             }))
@@ -556,7 +567,7 @@ mod tests {
             .unwrap();
         assert_eq!(stashed.0.selector, "stash@{0}");
         let dropped = server
-            .stash_drop(Parameters(tools::stash::StashDropArgs {
+            .stash_drop(in_default(tools::stash::StashDropArgs {
                 index: 0,
                 dry_run: true,
             }))
@@ -564,7 +575,7 @@ mod tests {
             .unwrap();
         assert!(dropped.0.dry_run);
         let popped = server
-            .stash_pop(Parameters(tools::stash::StashPopArgs {
+            .stash_pop(in_default(tools::stash::StashPopArgs {
                 index: 0,
                 restore_index: false,
                 drop: true,
@@ -574,7 +585,7 @@ mod tests {
         assert!(popped.0.dropped);
 
         let merged = server
-            .merge(Parameters(tools::integrate::MergeArgs {
+            .merge(in_default(tools::integrate::MergeArgs {
                 theirs: "main".into(),
                 message: None,
                 fast_forward: tools::integrate::FastForward::Allow,
@@ -583,12 +594,12 @@ mod tests {
             .unwrap();
         assert_eq!(merged.0.status, tools::integrate::OperationStatus::UpToDate);
         let pick = tools::integrate::PickArgs { rev: "nope".into() };
-        assert!(server.cherry_pick(Parameters(pick)).await.is_err());
+        assert!(server.cherry_pick(in_default(pick)).await.is_err());
         let pick = tools::integrate::PickArgs { rev: "nope".into() };
-        assert!(server.revert(Parameters(pick)).await.is_err());
+        assert!(server.revert(in_default(pick)).await.is_err());
         crate::tools::testutil::run_git(dir.path(), &["checkout", "--", "a.txt"]);
         let rebased = server
-            .rebase(Parameters(tools::rebase::RebaseArgs {
+            .rebase(in_default(tools::rebase::RebaseArgs {
                 onto: "main".into(),
                 upstream: None,
                 todo: None,
@@ -603,12 +614,17 @@ mod tests {
             message: None,
             skip: false,
         };
-        assert!(server.continue_operation(Parameters(args)).await.is_err());
-        assert!(server.abort_operation().await.is_err());
+        assert!(server.continue_operation(in_default(args)).await.is_err());
+        assert!(
+            server
+                .abort_operation(Parameters(RepoOnly::default()))
+                .await
+                .is_err()
+        );
         let parent = tempfile::tempdir().unwrap();
         let path = parent.path().join("wt");
         let added = server
-            .worktree_add(Parameters(tools::worktrees::WorktreeAddArgs {
+            .worktree_add(in_default(tools::worktrees::WorktreeAddArgs {
                 path: path.display().to_string(),
                 target: "spare".into(),
                 create: true,
@@ -619,7 +635,7 @@ mod tests {
             .unwrap();
         assert_eq!(added.0.branch.as_deref(), Some("spare"));
         let removed = server
-            .worktree_remove(Parameters(tools::worktrees::WorktreeRemoveArgs {
+            .worktree_remove(in_default(tools::worktrees::WorktreeRemoveArgs {
                 worktree: path.display().to_string(),
                 force: false,
                 dry_run: true,

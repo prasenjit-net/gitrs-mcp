@@ -17,8 +17,9 @@ src/
 │  ├─ prompts.rs    the #[prompt_router]: one wrapper per prompt
 │  ├─ progress.rs   run_watched: request cancellation and progress tokens for long tools
 │  ├─ watch.rs      --watch: resource subscriptions and the polling task that notifies them
+│  ├─ repos.rs      the served repositories, the InRepo/RepoOnly argument wrappers, client roots
 │  └─ write.rs      write tools; only registered with --allow-write
-├─ repo.rs          RepoHandle: opens the repository, runs gix calls on the blocking pool
+├─ repo.rs          RepoHandle: finds and opens a repository, runs gix calls on the blocking pool
 └─ tools/           Git logic, as plain synchronous functions over &gix::Repository
    ├─ mod.rs        shared types and helpers (Signature, LogEntry, ChangeKind, pagination, paths), test fixtures
    ├─ repo.rs       repo_info
@@ -97,7 +98,17 @@ gix is synchronous and `gix::Repository` is not `Sync`, while rmcp handlers are 
 
 ## Repository discovery and paths
 
-At startup `RepoHandle::discover` finds the repository containing `--repo` (searching parent directories like `git` does), then makes its root the process working directory and reopens it from there. gix resolves pathspecs against the working directory captured when a repository is opened. Starting from the root guarantees that every path and pathspec argument is relative to the repository root, even when the server was launched from a subdirectory.
+At startup `RepoHandle::find_root` finds the repository containing each `--repo`, searching parent directories like `git` does. Then `RepoHandle::leave_worktrees` makes the filesystem root the process working directory, and only then are the repositories opened.
+
+This matters because gix resolves pathspecs against the working directory captured when a repository is opened: relative to the working tree, when that directory is inside it. From outside every working tree, each repository resolves paths from its own root. Every path and pathspec argument is therefore relative to the chosen repository's root, even when the server was launched from a subdirectory, and with several repositories open at once.
+
+### Several repositories
+
+`server::repos::Repos` holds the served repositories: the `--repo` ones, the first being the default, and those at the client's MCP roots. Every tool wrapper takes `Parameters<InRepo<Args>>`, where `InRepo` adds an optional `repo` field and `#[serde(flatten)]`s the tool's own arguments, so the published schema is the tool's plus one property. `GitServer::repo(name)` picks the handle: a name, or a path inside a served repository (resolved through symlinks, and refused if relative or containing `..`). Tool functions in `tools/` stay single-repository.
+
+Resources take `?repo=<name>`, which `server::repos::split_repo` removes before `tools::resources` sees the URI. Prompts take a `repo` argument, and completion suggests repository names for it.
+
+Client roots are listed after `notifications/initialized`, and again on `notifications/roots/list_changed`, on a separate task, since notification handlers run inside rmcp's message loop. A root is served only if the repository found there has its root inside the declared directory.
 
 Path arguments go through one normalizer (`tools::repo_path`). It strips `./` and trailing slashes, and rejects absolute paths and `..`, so a path can't name anything outside the repository.
 

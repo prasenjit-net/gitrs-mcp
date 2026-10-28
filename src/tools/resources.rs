@@ -402,15 +402,20 @@ pub fn complete(
         }
         _ => Vec::new(),
     };
+    Ok(matching(candidates, value))
+}
+
+/// The `candidates` starting with `typed`, sorted, without repeats, and at most 100.
+pub fn matching(candidates: Vec<String>, typed: &str) -> Completion {
     let mut values: Vec<String> = candidates
         .into_iter()
-        .filter(|c| c.starts_with(value))
+        .filter(|c| c.starts_with(typed))
         .collect();
     values.sort();
     values.dedup();
     let total = values.len();
     values.truncate(MAX_COMPLETIONS);
-    Ok(Completion { values, total })
+    Completion { values, total }
 }
 
 /// `HEAD`, the short names of branches, remote branches and tags, and `special` words.

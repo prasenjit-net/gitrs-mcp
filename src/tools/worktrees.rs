@@ -9,7 +9,7 @@ use gix::refs::{
 };
 
 use super::{
-    page_limit, paginate, resolve_commit,
+    page_limit, paginate, resolve_commit, root_relative,
     write::{branch_ref, checked_out_at, committer},
 };
 
@@ -215,7 +215,8 @@ pub fn worktree_add(
         }
         Head::Attached(name)
     };
-    let destination = Path::new(&args.path);
+    let destination = root_relative(repo, &args.path);
+    let destination = destination.as_path();
     if std::fs::read_dir(destination).is_ok_and(|mut entries| entries.next().is_some()) {
         bail!("`{}` exists and isn't empty; pick a new path", args.path);
     }
@@ -315,7 +316,7 @@ pub fn worktree_remove(
         .flatten();
     let path = match by_id {
         Some(proxy) => proxy.base()?,
-        None => PathBuf::from(&args.worktree),
+        None => root_relative(repo, &args.worktree),
     };
     let target = repo.prepare_remove_worktree(&path).with_context(|| {
         format!(
@@ -598,6 +599,27 @@ mod tests {
         );
         assert_unchanged(root, &before);
         assert!(!parent.path().join("a").exists());
+    }
+
+    #[test]
+    fn relative_paths_are_from_the_repository_root() {
+        let (dir, repo) = fixture_repo();
+        let entry = worktree_add(
+            &repo,
+            WorktreeAddArgs {
+                path: "wt/linked".into(),
+                target: "feature".into(),
+                create: false,
+                start_point: None,
+                detach: false,
+            },
+        )
+        .unwrap();
+        let expected = std::fs::canonicalize(dir.path().join("wt/linked")).unwrap();
+        assert_eq!(entry.path.as_deref(), Some(expected.to_str().unwrap()));
+        let removed = remove(&repo, "wt/linked", false, false).unwrap();
+        assert!(removed.removed);
+        assert!(!dir.path().join("wt/linked").exists());
     }
 
     #[test]

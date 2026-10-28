@@ -309,6 +309,17 @@ fn ensure_head_is_born(repo: &gix::Repository, rev: &str) -> anyhow::Result<()> 
     Ok(())
 }
 
+/// A filesystem path a caller gave relative to the repository root: kept when absolute, otherwise
+/// joined to the working tree (or to the git directory of a bare repository). The process working
+/// directory is never used, since it isn't the repository root (see `RepoHandle::leave_worktrees`).
+pub fn root_relative(repo: &gix::Repository, path: &str) -> std::path::PathBuf {
+    let path = std::path::Path::new(path);
+    if path.is_absolute() {
+        return path.to_owned();
+    }
+    repo.workdir().unwrap_or_else(|| repo.git_dir()).join(path)
+}
+
 /// Normalize a caller-supplied repository-relative path: strips `./`, duplicate and trailing `/`,
 /// and rejects absolute paths and `..` so nothing can escape the repository.
 ///

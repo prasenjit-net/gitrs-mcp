@@ -5,25 +5,39 @@ use rmcp::{
     tool, tool_router,
 };
 
-use super::GitServer;
+use super::{
+    GitServer,
+    repos::{InRepo, ListReposResult, RepoOnly},
+};
 use crate::tools;
 
 #[tool_router(router = repo_router, vis = "pub(super)")]
 impl GitServer {
+    /// The repositories this server serves: those it was started with (`--repo`, repeatable) and
+    /// any at the client's MCP roots. Pass a `name` as `repo` to any tool, prompt or resource
+    /// (`?repo=<name>`) to use that repository; without `repo`, the default (listed first) is used.
+    #[tool(annotations(title = "List repositories", read_only_hint = true))]
+    async fn list_repos(&self) -> Json<ListReposResult> {
+        Json(self.repos.describe())
+    }
+
     /// Repository overview: paths, HEAD, current branch, bareness, shallowness,
     /// and any in-progress operation (merge, rebase, cherry-pick, ...).
     #[tool(annotations(title = "Repository info", read_only_hint = true))]
-    async fn repo_info(&self) -> Result<Json<tools::repo::RepoInfo>, String> {
-        self.repo.run(tools::repo::repo_info).await.map(Json)
+    async fn repo_info(
+        &self,
+        Parameters(RepoOnly { repo }): Parameters<RepoOnly>,
+    ) -> Result<Json<tools::repo::RepoInfo>, String> {
+        self.repo(repo)?.run(tools::repo::repo_info).await.map(Json)
     }
 
     /// List branches and/or tags with the commit each points to.
     #[tool(annotations(title = "List refs", read_only_hint = true))]
     async fn list_refs(
         &self,
-        Parameters(args): Parameters<tools::refs::ListRefsArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::refs::ListRefsArgs>>,
     ) -> Result<Json<tools::refs::ListRefsResult>, String> {
-        self.repo
+        self.repo(repo)?
             .run(move |r| tools::refs::list_refs(r, args))
             .await
             .map(Json)
@@ -35,9 +49,9 @@ impl GitServer {
     #[tool(annotations(title = "Rev-parse", read_only_hint = true))]
     async fn rev_parse(
         &self,
-        Parameters(args): Parameters<tools::revision::RevParseArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::revision::RevParseArgs>>,
     ) -> Result<Json<tools::revision::RevParseResult>, String> {
-        self.repo
+        self.repo(repo)?
             .run(move |r| tools::revision::rev_parse(r, args))
             .await
             .map(Json)
@@ -49,9 +63,9 @@ impl GitServer {
     #[tool(annotations(title = "Compare refs", read_only_hint = true))]
     async fn compare_refs(
         &self,
-        Parameters(args): Parameters<tools::revision::CompareRefsArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::revision::CompareRefsArgs>>,
     ) -> Result<Json<tools::revision::CompareRefsResult>, String> {
-        self.repo
+        self.repo(repo)?
             .run(move |r| tools::revision::compare_refs(r, args))
             .await
             .map(Json)
@@ -63,9 +77,9 @@ impl GitServer {
     #[tool(annotations(title = "Describe", read_only_hint = true))]
     async fn describe(
         &self,
-        Parameters(args): Parameters<tools::refs::DescribeArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::refs::DescribeArgs>>,
     ) -> Result<Json<tools::refs::DescribeResult>, String> {
-        self.repo
+        self.repo(repo)?
             .run(move |r| tools::refs::describe(r, args))
             .await
             .map(Json)
@@ -76,9 +90,9 @@ impl GitServer {
     #[tool(annotations(title = "Show tag", read_only_hint = true))]
     async fn show_tag(
         &self,
-        Parameters(args): Parameters<tools::refs::ShowTagArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::refs::ShowTagArgs>>,
     ) -> Result<Json<tools::refs::ShowTagResult>, String> {
-        self.repo
+        self.repo(repo)?
             .run(move |r| tools::refs::show_tag(r, args))
             .await
             .map(Json)
@@ -90,9 +104,9 @@ impl GitServer {
     #[tool(annotations(title = "Reflog", read_only_hint = true))]
     async fn reflog(
         &self,
-        Parameters(args): Parameters<tools::reflog::ReflogArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::reflog::ReflogArgs>>,
     ) -> Result<Json<tools::reflog::ReflogResult>, String> {
-        self.repo
+        self.repo(repo)?
             .run(move |r| tools::reflog::reflog(r, args))
             .await
             .map(Json)
@@ -103,9 +117,9 @@ impl GitServer {
     #[tool(annotations(title = "List stashes", read_only_hint = true))]
     async fn list_stashes(
         &self,
-        Parameters(args): Parameters<tools::reflog::ListStashesArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::reflog::ListStashesArgs>>,
     ) -> Result<Json<tools::reflog::ListStashesResult>, String> {
-        self.repo
+        self.repo(repo)?
             .run(move |r| tools::reflog::list_stashes(r, args))
             .await
             .map(Json)

@@ -7,7 +7,7 @@ use rmcp::{
     tool, tool_router,
 };
 
-use super::GitServer;
+use super::{GitServer, repos::InRepo};
 use crate::tools;
 
 #[tool_router(router = files_router, vis = "pub(super)")]
@@ -18,9 +18,9 @@ impl GitServer {
     #[tool(annotations(title = "Read file", read_only_hint = true))]
     async fn read_file(
         &self,
-        Parameters(args): Parameters<tools::files::ReadFileArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::files::ReadFileArgs>>,
     ) -> Result<Json<tools::files::ReadFileResult>, String> {
-        self.repo
+        self.repo(repo)?
             .run(move |r| tools::files::read_file(r, args))
             .await
             .map(Json)
@@ -32,9 +32,9 @@ impl GitServer {
     #[tool(annotations(title = "List tree", read_only_hint = true))]
     async fn list_tree(
         &self,
-        Parameters(args): Parameters<tools::files::ListTreeArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::files::ListTreeArgs>>,
     ) -> Result<Json<tools::files::ListTreeResult>, String> {
-        self.repo
+        self.repo(repo)?
             .run(move |r| tools::files::list_tree(r, args))
             .await
             .map(Json)
@@ -46,12 +46,14 @@ impl GitServer {
     #[tool(annotations(title = "Blame", read_only_hint = true))]
     async fn blame(
         &self,
-        Parameters(args): Parameters<tools::blame::BlameArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::blame::BlameArgs>>,
         context: RequestContext<RoleServer>,
     ) -> Result<Json<tools::blame::BlameResult>, String> {
-        self.run_watched(context, move |r, w| tools::blame::blame(r, args, w))
-            .await
-            .map(Json)
+        self.run_watched(self.repo(repo)?, context, move |r, w| {
+            tools::blame::blame(r, args, w)
+        })
+        .await
+        .map(Json)
     }
 
     /// Search file contents for a regex, like `git grep`: tracked files in the working tree by default,
@@ -61,12 +63,14 @@ impl GitServer {
     #[tool(annotations(title = "Grep", read_only_hint = true))]
     async fn grep(
         &self,
-        Parameters(args): Parameters<tools::grep::GrepArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::grep::GrepArgs>>,
         context: RequestContext<RoleServer>,
     ) -> Result<Json<tools::grep::GrepResult>, String> {
-        self.run_watched(context, move |r, w| tools::grep::grep(r, args, w))
-            .await
-            .map(Json)
+        self.run_watched(self.repo(repo)?, context, move |r, w| {
+            tools::grep::grep(r, args, w)
+        })
+        .await
+        .map(Json)
     }
 
     /// Whether paths are ignored, and by which rule, like `git check-ignore -v`: the pattern, the file
@@ -75,9 +79,9 @@ impl GitServer {
     #[tool(annotations(title = "Check ignore", read_only_hint = true))]
     async fn check_ignore(
         &self,
-        Parameters(args): Parameters<tools::attributes::CheckIgnoreArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::attributes::CheckIgnoreArgs>>,
     ) -> Result<Json<tools::attributes::CheckIgnoreResult>, String> {
-        self.repo
+        self.repo(repo)?
             .run(move |r| tools::attributes::check_ignore(r, args))
             .await
             .map(Json)
@@ -89,9 +93,9 @@ impl GitServer {
     #[tool(annotations(title = "Check attributes", read_only_hint = true))]
     async fn check_attr(
         &self,
-        Parameters(args): Parameters<tools::attributes::CheckAttrArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::attributes::CheckAttrArgs>>,
     ) -> Result<Json<tools::attributes::CheckAttrResult>, String> {
-        self.repo
+        self.repo(repo)?
             .run(move |r| tools::attributes::check_attr(r, args))
             .await
             .map(Json)

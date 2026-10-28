@@ -5,7 +5,7 @@ use rmcp::{
     tool, tool_router,
 };
 
-use super::GitServer;
+use super::{GitServer, repos::InRepo};
 use crate::tools;
 
 #[tool_router(router = changes_router, vis = "pub(super)")]
@@ -16,9 +16,9 @@ impl GitServer {
     #[tool(annotations(title = "Status", read_only_hint = true))]
     async fn status(
         &self,
-        Parameters(args): Parameters<tools::status::StatusArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::status::StatusArgs>>,
     ) -> Result<Json<tools::status::StatusResult>, String> {
-        self.repo
+        self.repo(repo)?
             .run(move |r| tools::status::status(r, args))
             .await
             .map(Json)
@@ -31,9 +31,9 @@ impl GitServer {
     #[tool(annotations(title = "Diff", read_only_hint = true))]
     async fn diff(
         &self,
-        Parameters(args): Parameters<tools::diff::DiffArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::diff::DiffArgs>>,
     ) -> Result<Json<tools::diff::DiffResult>, String> {
-        self.repo
+        self.repo(repo)?
             .run(move |r| tools::diff::diff(r, args))
             .await
             .map(Json)
@@ -45,9 +45,9 @@ impl GitServer {
     #[tool(annotations(title = "Conflicts", read_only_hint = true))]
     async fn conflicts(
         &self,
-        Parameters(args): Parameters<tools::merge::ConflictsArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::merge::ConflictsArgs>>,
     ) -> Result<Json<tools::merge::ConflictsResult>, String> {
-        self.repo
+        self.repo(repo)?
             .run(move |r| tools::merge::conflicts(r, args))
             .await
             .map(Json)
@@ -60,9 +60,9 @@ impl GitServer {
     #[tool(annotations(title = "Merge preview", read_only_hint = true))]
     async fn merge_preview(
         &self,
-        Parameters(args): Parameters<tools::merge::MergePreviewArgs>,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::merge::MergePreviewArgs>>,
     ) -> Result<Json<tools::merge::MergePreviewResult>, String> {
-        self.repo
+        self.repo(repo)?
             .run(move |r| tools::merge::merge_preview(r, args))
             .await
             .map(Json)

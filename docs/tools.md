@@ -1,10 +1,10 @@
 # Tool reference
 
-gitrs-mcp exposes 27 read-only tools, plus 22 write tools that are only available when the server runs with `--allow-write`. This page covers each one: what it does, its arguments and defaults, the fields it returns, the errors it reports, and a real request and response.
+gitrs-mcp exposes 28 read-only tools, plus 22 write tools that are only available when the server runs with `--allow-write`. This page covers each one: what it does, its arguments and defaults, the fields it returns, the errors it reports, and a real request and response.
 
 - [Conventions](#conventions)
 - [Shared types](#shared-types)
-- Repository and refs: [`repo_info`](#repo_info), [`list_refs`](#list_refs), [`rev_parse`](#rev_parse), [`compare_refs`](#compare_refs), [`describe`](#describe), [`show_tag`](#show_tag), [`reflog`](#reflog), [`list_stashes`](#list_stashes)
+- Repository and refs: [`list_repos`](#list_repos), [`repo_info`](#repo_info), [`list_refs`](#list_refs), [`rev_parse`](#rev_parse), [`compare_refs`](#compare_refs), [`describe`](#describe), [`show_tag`](#show_tag), [`reflog`](#reflog), [`list_stashes`](#list_stashes)
 - Local changes and merges: [`status`](#status), [`diff`](#diff), [`conflicts`](#conflicts), [`merge_preview`](#merge_preview)
 - Files: [`read_file`](#read_file), [`list_tree`](#list_tree), [`blame`](#blame), [`grep`](#grep), [`check_ignore`](#check_ignore), [`check_attr`](#check_attr)
 - History: [`log`](#log), [`show_commit`](#show_commit), [`file_history`](#file_history), [`search_commits`](#search_commits), [`notes`](#notes)
@@ -15,6 +15,7 @@ gitrs-mcp exposes 27 read-only tools, plus 22 write tools that are only availabl
 
 These rules hold for every tool.
 
+- **Several repositories.** Every tool takes an optional `repo` argument, which isn't repeated in the tables below. It is the name of a served repository from [`list_repos`](#list_repos), or a path inside one. Without it, the tool runs on the default repository, the first `--repo` the server was started with. Anything else is refused, so a call can't reach other paths.
 - **Revisions** accept anything `git rev-parse` does: full or abbreviated SHAs, branch and tag names, `HEAD~2`, `v1.0^{tree}`, `main@{1}`, `:/message text`. Annotated tags are peeled to the commit they point at when a commit is needed.
 - **Paths and pathspecs** are relative to the repository root, whatever directory the server was started from. Paths may not be absolute or contain `..`. Pathspec arguments accept git's pathspec syntax, including globs (`*.rs`) and magic such as `:(exclude)docs`.
 - **Lists are paginated.** List tools take `limit` (and usually `skip`) and return `truncated: true` when more items exist. The default and maximum `limit` differ per tool and are listed below.
@@ -54,6 +55,42 @@ The examples come from a small demo repository, which [`scripts/demo-repo.sh`](.
 **ChangeKind**: how a path changed. One of `added`, `modified`, `deleted`, `renamed`, `copied`, `typechange`. A `typechange` is a switch between regular file, symlink and submodule. Flipping only the executable bit counts as `modified`.
 
 ---
+
+## `list_repos`
+
+The repositories this server serves: those it was started with (`--repo`, which can be repeated) and any at the client's MCP roots. Pass a `name` as `repo` to any tool or prompt, or as `?repo=<name>` on a [resource](resources.md), to use that repository.
+
+**Arguments:** none.
+
+**Result**
+
+| Field | Type | Description |
+|---|---|---|
+| `repos[].name` | string | Name to pass as `repo`: the root directory's name, with `-2`, `-3`, ... when names repeat. |
+| `repos[].root` | string | Absolute path of the repository's root: its working tree, or the git directory if bare. |
+| `repos[].default` | boolean | True for the repository used when `repo` is omitted; it's listed first. |
+| `repos[].bare` | boolean | True for a bare repository. |
+| `repos[].source` | string | `command_line` (from `--repo`) or `client_roots` (from the client's MCP roots). |
+
+**Example**
+
+```json
+{}
+```
+
+```json
+{
+  "repos": [
+    {
+      "bare": false,
+      "default": true,
+      "name": "demo",
+      "root": "/path/to/demo",
+      "source": "command_line"
+    }
+  ]
+}
+```
 
 ## `repo_info`
 

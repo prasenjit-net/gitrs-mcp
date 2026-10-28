@@ -30,6 +30,11 @@ struct Args {
     /// Without this flag the server is strictly read-only.
     #[arg(long)]
     allow_write: bool,
+
+    /// Let clients subscribe to gitrs:// resources and notify them when one changes (a commit,
+    /// staging, an edit on disk). Subscribed resources are checked once a second.
+    #[arg(long)]
+    watch: bool,
 }
 
 #[tokio::main]
@@ -48,10 +53,11 @@ async fn main() -> anyhow::Result<()> {
             args.repo.display()
         )
     })?;
-    tracing::info!(git_dir = %repo.git_dir().display(), allow_write = args.allow_write, "starting");
+    tracing::info!(git_dir = %repo.git_dir().display(), allow_write = args.allow_write, watch = args.watch, "starting");
 
     let policy = Policy {
         allow_write: args.allow_write,
+        watch_interval: args.watch.then_some(std::time::Duration::from_secs(1)),
     };
     let service = GitServer::new(repo, policy).serve(stdio()).await?;
     service.waiting().await?;

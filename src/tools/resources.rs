@@ -1,7 +1,10 @@
 //! Repository content as MCP resources: commits, files and diffs addressed by `gitrs://` URIs, so
 //! a client can attach them as context, plus completion of revisions and paths for their arguments.
 
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    hash::{DefaultHasher, Hash, Hasher},
+};
 
 use anyhow::{Context, bail};
 use gix::{
@@ -332,6 +335,44 @@ fn file(repo: &gix::Repository, rev: String, path: String) -> anyhow::Result<Con
         (None, None) => bail!("`{}` came back without content", read.path),
     };
     Ok(contents)
+}
+
+/// A value that changes whenever the content of `uri` may have changed, cheap enough to poll: the
+/// object a revision side resolves to and the index file's size and modification time. A working
+/// tree side has no such summary, so its content is hashed. A URI that can't be read hashes its
+/// error, so becoming readable (or unreadable) counts as a change too.
+pub fn fingerprint(repo: &gix::Repository, uri: &str) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    match state(repo, uri) {
+        Ok(parts) => parts.hash(&mut hasher),
+        Err(err) => format!("{err:#}").hash(&mut hasher),
+    }
+    hasher.finish()
+}
+
+fn state(repo: &gix::Repository, uri: &str) -> anyhow::Result<Vec<String>> {
+    Ok(match Address::parse(uri)? {
+        Address::Commit { rev } => vec![side_state(repo, &rev)?],
+        Address::File { rev, path } if rev == "worktree" => match read(repo, uri)?.body {
+            Body::Text(text) | Body::Base64(text) => vec![path, text],
+        },
+        Address::File { rev, .. } => vec![side_state(repo, &rev)?],
+        Address::Diff { from, to } if to == "worktree" => {
+            vec![render(&diff(repo, diff_args(&from, &to, MAX_MAX_BYTES)?)?)]
+        }
+        Address::Diff { from, to } => vec![side_state(repo, &from)?, side_state(repo, &to)?],
+    })
+}
+
+/// What one side of a resource currently is: the index file's stamp, or the object a revision names.
+fn side_state(repo: &gix::Repository, side: &str) -> anyhow::Result<String> {
+    if side == "index" {
+        return Ok(match std::fs::metadata(repo.index_path()) {
+            Ok(meta) => format!("index {} {:?}", meta.len(), meta.modified().ok()),
+            Err(_) => "no index".to_owned(),
+        });
+    }
+    Ok(repo.rev_parse_single(side)?.to_string())
 }
 
 /// Completion values for one argument, at most 100, ordered.
@@ -669,6 +710,71 @@ mod tests {
         for template in TEMPLATES {
             assert!(template.uri_template.starts_with(SCHEME));
         }
+    }
+
+    #[test]
+    fn fingerprints_change_with_what_the_resource_shows() {
+        let (dir, repo) = fixture_repo();
+        let root = dir.path();
+        let uris = [
+            "gitrs://commit/HEAD",
+            "gitrs://commit/v1",
+            "gitrs://file/HEAD/a.txt",
+            "gitrs://file/index/a.txt",
+            "gitrs://file/worktree/a.txt",
+            "gitrs://diff/HEAD..index",
+            "gitrs://diff/index..worktree",
+            "gitrs://commit/no-such-rev",
+        ];
+        let prints = || -> Vec<u64> { uris.iter().map(|u| fingerprint(&repo, u)).collect() };
+        let changed = |before: &[u64], after: &[u64]| -> Vec<&str> {
+            uris.iter()
+                .zip(before.iter().zip(after))
+                .filter(|(_, (a, b))| a != b)
+                .map(|(uri, _)| *uri)
+                .collect()
+        };
+        let start = prints();
+        assert_eq!(prints(), start, "stable while nothing changes");
+
+        write(root, "a.txt", "edited\n");
+        let edited = prints();
+        assert_eq!(
+            changed(&start, &edited),
+            [
+                "gitrs://file/worktree/a.txt",
+                "gitrs://diff/index..worktree"
+            ]
+        );
+
+        run_git(root, &["add", "a.txt"]);
+        let staged = prints();
+        assert_eq!(
+            changed(&edited, &staged),
+            [
+                "gitrs://file/index/a.txt",
+                "gitrs://diff/HEAD..index",
+                "gitrs://diff/index..worktree"
+            ]
+        );
+
+        run_git(root, &["commit", "-q", "-m", "third"]);
+        let committed = changed(&staged, &prints());
+        for uri in [
+            "gitrs://commit/HEAD",
+            "gitrs://file/HEAD/a.txt",
+            "gitrs://diff/HEAD..index",
+        ] {
+            assert!(committed.contains(&uri), "{uri}: {committed:?}");
+        }
+        assert!(
+            !committed.contains(&"gitrs://commit/v1"),
+            "a tag that didn't move"
+        );
+
+        let before = prints();
+        run_git(root, &["tag", "no-such-rev"]);
+        assert_eq!(changed(&before, &prints()), ["gitrs://commit/no-such-rev"]);
     }
 
     fn values(

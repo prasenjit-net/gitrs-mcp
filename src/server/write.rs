@@ -432,7 +432,10 @@ mod tests {
         let (dir, _) = fixture_repo();
         let server = GitServer::new(
             RepoHandle::open_isolated(dir.path()),
-            Policy { allow_write: true },
+            Policy {
+                allow_write: true,
+                watch_interval: None,
+            },
         );
         let created = server
             .create_branch(Parameters(tools::branches::CreateBranchArgs {

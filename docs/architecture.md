@@ -15,6 +15,8 @@ src/
 │  ├─ setup.rs      worktrees, submodules, config and object storage
 │  ├─ resources.rs  resources and completion, mapped onto rmcp's types
 │  ├─ prompts.rs    the #[prompt_router]: one wrapper per prompt
+│  ├─ progress.rs   run_watched: request cancellation and progress tokens for long tools
+│  ├─ watch.rs      --watch: resource subscriptions and the polling task that notifies them
 │  └─ write.rs      write tools; only registered with --allow-write
 ├─ repo.rs          RepoHandle: opens the repository, runs gix calls on the blocking pool
 └─ tools/           Git logic, as plain synchronous functions over &gix::Repository
@@ -45,6 +47,7 @@ src/
    ├─ submodules.rs list_submodules
    ├─ config.rs     config_get, plus the secret redaction submodule URLs share
    ├─ objects.rs    count_objects
+   ├─ progress.rs   Watch: cancellation flag and progress reports, without MCP types
    ├─ prompts.rs    prompt text: diffs, blame and history filled into instructions
    └─ history.rs    log, show_commit, file_history, search_commits
 ```
@@ -83,6 +86,10 @@ Long walks get a `tools::progress::Watch`, so the tool layer can report progress
 - If the request has a progress token, reports go through a channel to a task that sends `notifications/progress`, at most one every 250 ms. `run_watched` waits for that task to drain before returning, so every notification reaches the client before the result.
 
 Other callers, such as the prompts, pass `Watch::none()`.
+
+### Resource subscriptions
+
+With `--watch`, `GitServer` owns a `server::watch::Watcher`, which holds the subscribed URIs and the fingerprint last seen for each (`tools::resources::fingerprint`). A polling task starts with the first subscription. It runs once per interval on the blocking pool, and holds only a weak reference to the watcher, so it ends with the server. URIs whose fingerprint changed are sent to legacy subscribers through the client's peer, and broadcast to open `subscriptions/listen` streams, each of which forwards the URIs it accepted. For `subscriptions/listen`, rmcp acknowledges before calling `listen`, so the baselines are taken in `accepted_subscription_filter`: a change right after the acknowledgment is still reported.
 
 ## The sync/async bridge
 

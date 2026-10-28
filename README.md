@@ -35,6 +35,7 @@ gitrs-mcp [OPTIONS]
 Options:
   -r, --repo <REPO>  Repository to serve; any path inside a worktree works (default: .)
       --allow-write  Enable tools that modify the repository
+      --watch        Notify clients when subscribed gitrs:// resources change
   -h, --help         Print help
   -V, --version      Print version
 ```

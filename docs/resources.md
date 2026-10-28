@@ -6,7 +6,7 @@ Besides tools, gitrs-mcp offers three other MCP features:
 - **Prompts:** ready-made requests, such as "write a commit message", that come filled in with the repository data they need. Clients usually offer them as slash commands.
 - **Completion:** suggestions for revisions and paths while you fill in a resource URI or a prompt argument.
 
-All three are read-only and available with or without `--allow-write`.
+All three are read-only and available with or without `--allow-write`. With `--watch`, clients can also subscribe to resources and get notified when they change.
 
 ## Listed resources
 
@@ -119,6 +119,23 @@ Run against the demo repository from `scripts/demo-repo.sh`.
   "message": "unsupported diff `HEAD..worktree`; use `<rev>..<rev>`, `<rev>..index` or `index..worktree`"
 }
 ```
+
+## Subscriptions
+
+With [`--watch`](configuration.md#command-line), clients can subscribe to any `gitrs://` resource, listed or built from a template. The server then sends `notifications/resources/updated` when the resource changes, and the client reads it again. Without `--watch`, the `resources.subscribe` capability isn't advertised and subscribing is refused.
+
+Both MCP subscription styles work:
+
+- **`resources/subscribe` and `resources/unsubscribe`**, which current clients use with the `initialize` handshake. Subscribing twice to the same URI is one subscription. A URI that isn't a valid `gitrs://` resource is refused with code `-32602`.
+- **`subscriptions/listen`**, the stream of protocol 2026-07-28. The acknowledgment lists the URIs that were accepted; those that don't parse are left out. Cancelling the stream ends the subscription.
+
+A background task checks each subscribed URI once a second. It compares a cheap fingerprint of what the resource shows:
+
+- a revision: the object it resolves to now, so a commit, a moved branch or a new tag all count;
+- `index`: the index file's size and modification time, so staging counts;
+- `worktree`: the resource's content, since edits on disk change nothing in HEAD, refs or the index. A subscription to `gitrs://diff/index..worktree` therefore computes that diff once a second.
+
+A URI that becomes readable or unreadable, such as a revision that starts or stops existing, counts as a change too. Changes that happen in quick succession within one second produce one notification.
 
 ## Prompts
 

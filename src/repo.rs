@@ -47,6 +47,12 @@ impl RepoHandle {
         self.repo.git_dir()
     }
 
+    /// Run `f` against the repository on the calling thread, for quick work in a synchronous
+    /// callback that can't wait for the blocking pool.
+    pub fn run_now<T>(&self, f: impl FnOnce(&gix::Repository) -> T) -> T {
+        f(&self.repo.to_thread_local())
+    }
+
     /// Run `f` against the repository on the blocking pool.
     ///
     /// Errors are returned as `String` so rmcp reports them as tool-level errors

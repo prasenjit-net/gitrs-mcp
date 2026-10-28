@@ -12,6 +12,7 @@ mod prompts;
 mod repo;
 mod resources;
 mod setup;
+mod watch;
 mod write;
 
 use rmcp::{
@@ -20,10 +21,11 @@ use rmcp::{
     model::{
         CompleteRequestParams, CompleteResult, Implementation, ListResourceTemplatesResult,
         ListResourcesResult, PaginatedRequestParams, ReadResourceRequestParams,
-        ReadResourceResponse, ServerCapabilities, ServerConfig,
+        ReadResourceResponse, ServerCapabilities, ServerConfig, SubscribeRequestParams,
+        SubscriptionFilter, UnsubscribeRequestParams,
     },
     prompt_handler,
-    service::RequestContext,
+    service::{RequestContext, SubscriptionContext},
     tool_handler,
 };
 
@@ -33,6 +35,9 @@ use crate::repo::RepoHandle;
 pub struct Policy {
     /// Gate for every tool that mutates the repo, index, or worktree.
     pub allow_write: bool,
+    /// With `--watch`, how often subscribed resources are checked for changes; `None` turns
+    /// resource subscriptions off.
+    pub watch_interval: Option<std::time::Duration>,
 }
 
 #[derive(Clone)]
@@ -41,6 +46,7 @@ pub struct GitServer {
     policy: Policy,
     tool_router: ToolRouter<Self>,
     prompt_router: PromptRouter<Self>,
+    watcher: Option<std::sync::Arc<watch::Watcher>>,
 }
 
 impl GitServer {
@@ -54,11 +60,15 @@ impl GitServer {
         if policy.allow_write {
             tool_router += Self::write_router();
         }
+        let watcher = policy
+            .watch_interval
+            .map(|interval| watch::Watcher::new(repo.clone(), interval));
         Self {
             repo,
             policy,
             tool_router,
             prompt_router: Self::prompts_router(),
+            watcher,
         }
     }
 }
@@ -67,12 +77,16 @@ impl GitServer {
 #[prompt_handler(router = self.prompt_router)]
 impl ServerHandler for GitServer {
     fn get_info(&self) -> ServerConfig {
-        let capabilities = ServerCapabilities::builder()
+        let builder = ServerCapabilities::builder()
             .enable_tools()
             .enable_prompts()
-            .enable_resources()
-            .enable_completions()
-            .build();
+            .enable_resources();
+        let builder = if self.watcher.is_some() {
+            builder.enable_resources_subscribe()
+        } else {
+            builder
+        };
+        let capabilities = builder.enable_completions().build();
         ServerConfig::new(capabilities)
             .with_server_info(Implementation::new(
                 env!("CARGO_PKG_NAME"),
@@ -111,6 +125,33 @@ impl ServerHandler for GitServer {
         _context: RequestContext<RoleServer>,
     ) -> Result<CompleteResult, McpError> {
         Ok(self.completion(request).await)
+    }
+
+    async fn subscribe(
+        &self,
+        request: SubscribeRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<(), McpError> {
+        self.subscribe_legacy(request.uri, context.peer).await
+    }
+
+    async fn unsubscribe(
+        &self,
+        request: UnsubscribeRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<(), McpError> {
+        self.unsubscribe_legacy(&request.uri)
+    }
+
+    fn accepted_subscription_filter(
+        &self,
+        requested: &SubscriptionFilter,
+    ) -> Option<SubscriptionFilter> {
+        self.listen_filter(requested)
+    }
+
+    async fn listen(&self, context: SubscriptionContext) -> Result<(), McpError> {
+        self.listen_stream(context).await
     }
 }
 
@@ -163,6 +204,204 @@ mod tests {
         "worktree_add",
         "worktree_remove",
     ];
+
+    /// A client that records the resource updates it receives.
+    #[derive(Clone, Default)]
+    struct UpdateRecorder(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
+
+    impl rmcp::ClientHandler for UpdateRecorder {
+        async fn on_resource_updated(
+            &self,
+            params: rmcp::model::ResourceUpdatedNotificationParam,
+            _context: rmcp::service::NotificationContext<rmcp::RoleClient>,
+        ) {
+            self.0.lock().unwrap().push(params.uri);
+        }
+    }
+
+    impl UpdateRecorder {
+        /// Wait up to two seconds for `count` updates in all.
+        async fn wait_for(&self, count: usize) -> Vec<String> {
+            for _ in 0..200 {
+                if self.0.lock().unwrap().len() >= count {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            self.0.lock().unwrap().clone()
+        }
+    }
+
+    /// A server on `path` that checks subscriptions every 20 ms. With `modern`, the client uses
+    /// protocol 2026-07-28 (no `initialize`), which `subscriptions/listen` needs.
+    async fn watching<C: rmcp::ClientHandler>(
+        path: &std::path::Path,
+        handler: C,
+        modern: bool,
+    ) -> rmcp::service::RunningService<rmcp::RoleClient, C> {
+        use rmcp::ServiceExt;
+        let (server_side, client_side) = tokio::io::duplex(1 << 16);
+        let server = GitServer::new(
+            RepoHandle::open_isolated(path),
+            Policy {
+                allow_write: false,
+                watch_interval: Some(std::time::Duration::from_millis(20)),
+            },
+        );
+        tokio::spawn(async move {
+            let running = server.serve(server_side).await?;
+            running.waiting().await?;
+            anyhow::Ok(())
+        });
+        if !modern {
+            return handler.serve(client_side).await.expect("client connects");
+        }
+        use rmcp::service::ClientServiceExt;
+        let lifecycle = rmcp::ClientLifecycleMode::Discover {
+            preferred_versions: vec![rmcp::model::ProtocolVersion::V_2026_07_28],
+        };
+        handler
+            .serve_with_lifecycle(client_side, lifecycle)
+            .await
+            .expect("client connects")
+    }
+
+    // The legacy subscribe requests are what today's clients send; rmcp marks them deprecated in
+    // favour of `subscriptions/listen`, which the next test covers.
+    #[allow(deprecated)]
+    #[tokio::test]
+    async fn legacy_subscriptions_report_changes() {
+        use crate::tools::testutil::{run_git, write};
+        use rmcp::model::{SubscribeRequestParams, UnsubscribeRequestParams};
+        let (dir, _) = fixture_repo();
+        let recorder = UpdateRecorder::default();
+        let client = watching(dir.path(), recorder.clone(), false).await;
+        let info = client.peer_info().unwrap();
+        assert_eq!(
+            info.capabilities
+                .resources
+                .as_ref()
+                .and_then(|r| r.subscribe),
+            Some(true)
+        );
+        for uri in ["gitrs://diff/index..worktree", "gitrs://commit/HEAD"] {
+            client
+                .subscribe(SubscribeRequestParams::new(uri))
+                .await
+                .unwrap();
+        }
+        let bad = client
+            .subscribe(SubscribeRequestParams::new("gitrs://nope"))
+            .await;
+        assert!(bad.is_err());
+
+        write(dir.path(), "a.txt", "edited\n");
+        assert_eq!(recorder.wait_for(1).await, ["gitrs://diff/index..worktree"]);
+        run_git(dir.path(), &["commit", "-q", "-am", "third"]);
+        let seen = recorder.wait_for(3).await;
+        assert!(seen.contains(&"gitrs://commit/HEAD".to_owned()), "{seen:?}");
+
+        client
+            .unsubscribe(UnsubscribeRequestParams::new("gitrs://commit/HEAD"))
+            .await
+            .unwrap();
+        let before = recorder.0.lock().unwrap().len();
+        run_git(
+            dir.path(),
+            &["commit", "-q", "--allow-empty", "-m", "fourth"],
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        assert_eq!(recorder.0.lock().unwrap().len(), before, "unsubscribed");
+        client.cancel().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn listen_streams_report_changes() {
+        use crate::tools::testutil::run_git;
+        use rmcp::model::{ServerNotification, SubscriptionFilter};
+        let (dir, _) = fixture_repo();
+        let client = watching(dir.path(), (), true).await;
+        let filter = SubscriptionFilter::builder()
+            .resource_subscriptions(["gitrs://commit/HEAD".to_owned(), "nope".to_owned()])
+            .build();
+        let mut stream = client.listen(filter).await.unwrap();
+        assert_eq!(
+            stream.acknowledged().resource_subscriptions.as_deref(),
+            Some(&["gitrs://commit/HEAD".to_owned()][..]),
+            "only URIs that parse are accepted"
+        );
+        run_git(
+            dir.path(),
+            &["commit", "-q", "--allow-empty", "-m", "third"],
+        );
+        let note = tokio::time::timeout(std::time::Duration::from_secs(2), stream.next())
+            .await
+            .expect("an update arrives")
+            .unwrap()
+            .unwrap();
+        match note {
+            ServerNotification::ResourceUpdatedNotification(n) => {
+                assert_eq!(n.params.uri, "gitrs://commit/HEAD");
+            }
+            other => panic!("unexpected notification {other:?}"),
+        }
+
+        // A second stream on another URI: each only hears about its own.
+        let edits = SubscriptionFilter::builder()
+            .resource_subscriptions([
+                "gitrs://diff/index..worktree".to_owned(),
+                "gitrs://commit/HEAD".to_owned(),
+            ])
+            .build();
+        let mut both = client.listen(edits).await.unwrap();
+        crate::tools::testutil::write(dir.path(), "a.txt", "edited\n");
+        let note = tokio::time::timeout(std::time::Duration::from_secs(2), both.next())
+            .await
+            .expect("an update arrives")
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            note,
+            ServerNotification::ResourceUpdatedNotification(ref n)
+                if n.params.uri == "gitrs://diff/index..worktree"
+        ));
+        let quiet =
+            tokio::time::timeout(std::time::Duration::from_millis(100), stream.next()).await;
+        assert!(
+            quiet.is_err(),
+            "the first stream didn't subscribe to the edit"
+        );
+
+        stream.cancel().await.unwrap();
+        both.cancel().await.unwrap();
+        // Nothing is subscribed now; the poller idles, then stops once the server is gone.
+        tokio::time::sleep(std::time::Duration::from_millis(60)).await;
+        client.cancel().await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(60)).await;
+    }
+
+    // See `legacy_subscriptions_report_changes`.
+    #[allow(deprecated)]
+    #[tokio::test]
+    async fn subscriptions_need_watch() {
+        use rmcp::model::SubscribeRequestParams;
+        let (dir, _) = fixture_repo();
+        let client = connect(dir.path(), false).await;
+        let info = client.peer_info().unwrap();
+        assert_eq!(
+            info.capabilities
+                .resources
+                .as_ref()
+                .and_then(|r| r.subscribe),
+            None
+        );
+        let err = client
+            .subscribe(SubscribeRequestParams::new("gitrs://commit/HEAD"))
+            .await
+            .unwrap_err();
+        assert!(format!("{err:?}").contains("--watch"), "{err:?}");
+        client.cancel().await.unwrap();
+    }
 
     /// A client connected to a server on `path` over an in-memory pipe, speaking the real protocol.
     pub(crate) async fn connect(
@@ -334,7 +573,13 @@ mod tests {
     }
 
     fn server(path: &std::path::Path, allow_write: bool) -> GitServer {
-        GitServer::new(RepoHandle::open_isolated(path), Policy { allow_write })
+        GitServer::new(
+            RepoHandle::open_isolated(path),
+            Policy {
+                allow_write,
+                watch_interval: None,
+            },
+        )
     }
 
     fn read_only(tool: &rmcp::model::Tool) -> Option<bool> {

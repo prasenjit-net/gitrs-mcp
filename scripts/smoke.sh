@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # End-to-end MCP check over stdio: initialize, list tools, call every read tool once, list and read
 # resources, complete an argument and get prompts, then start a second session with --allow-write and check the
-# write tools appear only there.
+# write tools appear only there, and a third with --watch that subscribes to a resource.
 # Usage: scripts/smoke.sh <path-to-gitrs-mcp-binary> <repo> [file]
 # `file` is a tracked file for read_file, blame and file_history (default README.md).
 # Calls whose result depends on what the repo contains (a tag to show, ...) ask for something that
@@ -58,9 +58,11 @@ requests=(
   '{"jsonrpc":"2.0","id":37,"method":"prompts/get","params":{"name":"explain_history","arguments":{"path":"'"$file"'","limit":"3"}}}'
   # HEAD..HEAD has nothing to review, whatever the repository holds.
   '{"jsonrpc":"2.0","id":38,"method":"prompts/get","params":{"name":"review_changes","arguments":{"from":"HEAD","to":"HEAD"}}}'
+  # Subscriptions need --watch; the third session below has it.
+  '{"jsonrpc":"2.0","id":39,"method":"resources/subscribe","params":{"uri":"gitrs://commit/HEAD"}}'
 )
-last_id=38
-expect_error='17 34 38' # space-separated request ids that must fail: a tool error, or a protocol error
+last_id=39
+expect_error='17 34 38 39' # space-separated request ids that must fail: a tool error, or a protocol error
 
 write_tools='create_branch delete_branch rename_branch create_tag stage unstage commit reset restore switch clean stash_push stash_pop stash_drop merge cherry_pick revert rebase continue_operation abort_operation worktree_add worktree_remove'
 write_requests=(
@@ -115,3 +117,7 @@ sys.exit(1 if failed else 0)
 
 session "" "$last_id" "$expect_error" no "${requests[@]}"
 session --allow-write 9 "3 4 6 7 8 9" yes "${write_requests[@]}"
+session --watch 3 "3" no \
+  "${requests[@]:0:2}" \
+  '{"jsonrpc":"2.0","id":2,"method":"resources/subscribe","params":{"uri":"gitrs://commit/HEAD"}}' \
+  '{"jsonrpc":"2.0","id":3,"method":"resources/subscribe","params":{"uri":"gitrs://nope"}}' 

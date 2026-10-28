@@ -104,7 +104,10 @@ mod tests {
     fn server(path: &std::path::Path) -> GitServer {
         GitServer::new(
             RepoHandle::open_isolated(path),
-            Policy { allow_write: false },
+            Policy {
+                allow_write: false,
+                watch_interval: None,
+            },
         )
     }
 

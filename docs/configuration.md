@@ -8,12 +8,15 @@ gitrs-mcp [OPTIONS]
 Options:
   -r, --repo <REPO>  Repository to serve. Any path inside a worktree works; the repo is discovered upward [default: .]
       --allow-write  Enable tools that modify the repository (stage, commit, branch, ...). Without this flag the server is strictly read-only
+      --watch        Let clients subscribe to gitrs:// resources and notify them when one changes (a commit, staging, an edit on disk). Subscribed resources are checked once a second
   -h, --help         Print help
   -V, --version      Print version
 ```
 
 - `--repo` can point at the repository root, any directory inside its working tree, or a bare repository. The server serves exactly one repository per process. Tool path arguments are always relative to that repository's root, whichever directory you pass.
 - `--allow-write` registers the write tools (`create_branch`, `delete_branch`, `rename_branch`, `create_tag`, `stage`, `unstage`, `commit`, `reset`, `restore`, `switch`, `clean`, `stash_push`, `stash_pop`, `stash_drop`, `merge`, `cherry_pick`, `revert`, `rebase`, `continue_operation`, `abort_operation`, `worktree_add`, `worktree_remove`; see Phases 3 and 4 of the [roadmap](../ROADMAP.md)). Without it they aren't listed at all, and the server can't change the repository. Write tools record a committer from `user.name` / `user.email` (or `GIT_COMMITTER_NAME` / `GIT_COMMITTER_EMAIL`) and refuse to run without one; `GIT_COMMITTER_DATE` pins the recorded time, as with git.
+
+- `--watch` lets clients subscribe to [`gitrs://` resources](resources.md#subscriptions) and sends `notifications/resources/updated` when one changes. Only subscribed resources are checked, once a second, so the flag costs nothing until a client subscribes. Without it, subscribing is refused.
 
 The server speaks MCP over stdin and stdout, so it is started by an MCP client rather than run on its own.
 

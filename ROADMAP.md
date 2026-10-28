@@ -14,7 +14,7 @@ _Last updated 2026-10-27._
 | 3 Safe writes | ✅ Done: 10 tools behind `--allow-write`, each checked against the git CLI |
 | 4 History rewriting | ✅ Done: 12 tools behind `--allow-write`, each checked against the git CLI, with git and gitrs-mcp able to continue each other's operations |
 | 5 MCP-native extras | ✅ Done: resources, prompts, completion, progress and cancellation, `--watch`, several repositories, caching and benchmarks |
-| 6 Hardening and release | 🚧 In progress: security review, integration tests, fuzzing and stress tests done |
+| 6 Hardening and release | 🚧 In progress: security review, integration tests, fuzzing, stress tests and versioning done |
 
 The server has 28 read-only tools, plus 22 write tools registered only with `--allow-write`, along with resources, prompts and completion. 262 unit tests and the end-to-end smoke test pass, with 96.7% line coverage.
 
@@ -410,7 +410,7 @@ gix has no sequencer, so this phase is where we build our own logic on its primi
 - **Distribution.**
   - `cargo install gitrs-mcp`, prebuilt binaries via `cargo-dist`, a Homebrew tap.
   - Docs with copy-paste client config for Claude Code (`claude mcp add gitrs -- gitrs-mcp --repo .`), Claude Desktop, VS Code and Cursor.
-- **Versioning.** Tool names and schemas are a public API. Use semver: add fields freely, and never rename or remove fields within a major version.
+- **Versioning.** ✅ Tool names and schemas are a public API. Use semver: add fields freely, and never rename or remove fields within a major version.
 
 ### Phase 6: deviations from the plan
 
@@ -425,6 +425,7 @@ gix has no sequencer, so this phase is where we build our own logic on its primi
   - cargo-fuzz needs a library to link against, so the crate is now a library plus a thin binary. `src/lib.rs` keeps every module private and exports only what `main.rs` uses, plus a hidden `fuzzing` module.
   - Found: `repo_path` checked for a leading `\` before removing `./`, so `./\x` became the Windows-absolute `\x`. It's now checked after normalizing.
   - `make stress` runs the heaviest calls at their largest limits; every one stays bounded on git.git. linux.git wasn't tried, since output is bounded by the byte budgets and page limits, not by repository size.
+- **Versioning.** The policy is in [docs/versioning.md](docs/versioning.md). It's enforced by `api/schema.json`, a snapshot of every tool's schemas and annotations, every prompt's arguments and every resource template, generated from the server. A test fails on breaking changes: something removed, a changed type, a new required input, or a read-only tool that now writes. It also fails, until `make api` updates the snapshot, on compatible ones, so every API change is reviewed. Started a CHANGELOG.
 
 ---
 

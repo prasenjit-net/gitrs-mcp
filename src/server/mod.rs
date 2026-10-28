@@ -4,6 +4,8 @@
 //! as plain sync functions over `&gix::Repository` so it can be tested directly.
 //! Wrappers are grouped by area, one `#[tool_router]` per submodule, and combined here.
 
+#[cfg(test)]
+mod api;
 mod changes;
 mod files;
 mod history;

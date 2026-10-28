@@ -83,15 +83,22 @@ A tool is one function and one wrapper. Using a made-up `describe` tool as the e
    #[tool(annotations(title = "Describe", read_only_hint = true))]
    async fn describe(
        &self,
-       Parameters(args): Parameters<tools::refs::DescribeArgs>,
+       Parameters(InRepo { repo, args }): Parameters<InRepo<tools::refs::DescribeArgs>>,
    ) -> Result<Json<tools::refs::DescribeResult>, String> {
-       self.repo.run(move |r| tools::refs::describe(r, args)).await.map(Json)
+       self.repo(repo)?
+           .run(move |r| tools::refs::describe(r, args))
+           .await
+           .map(Json)
    }
    ```
+
+   `InRepo` adds the optional `repo` argument every tool takes. A tool without arguments takes `Parameters(RepoOnly { repo }): Parameters<RepoOnly>` instead. Write tools select their repository with `self.writable(repo)?`, which refuses repositories you don't own.
 
 5. **Test it** in the same file (see below), and add a call to `scripts/smoke.sh`. If the call needs something the served repository may not have (a tag, a merge in progress), ask for something that can't exist and add the request id to `expect_error`: the smoke test then requires that call to return a tool error.
 
 6. **Document it** in the same change: a section in [tools.md](tools.md) with an example taken from real output (build the demo workspace with `scripts/demo-repo.sh <new dir>` and call the tool on the repository it creates, for example with `make inspector REPO=<dir>/demo`), a row in the README's tool table, and the tool marked done in [ROADMAP.md](../ROADMAP.md).
+
+7. **Record the API.** Run `make api` to add the tool to `api/schema.json`. The API test fails until you do, so the new schema shows up in review. Renaming or removing anything is a breaking change; see [versioning](versioning.md).
 
 ## Testing
 
@@ -164,6 +171,12 @@ On a clone of git.git (82,605 commits, git 2.50.1, Apple M-series laptop, 5 runs
 - **`file_history`** is about 1.7 times git. It's our own walk, implementing git's history simplification, without a changed-path Bloom filter.
 - **`blame`** is about 1.5 times git. That time is gix's blame algorithm.
 - **First calls** are slower mostly because the operating system's file cache is cold. The per-thread object cache (see [architecture](architecture.md#the-syncasync-bridge)) makes repeated calls about 10% faster than without it: 22 to 18 ms for `log`, and 1,193 to 1,090 ms for `blame`.
+
+## Releasing
+
+1. Set the version in `Cargo.toml`, following [versioning](versioning.md).
+2. Move the `Unreleased` entries in [CHANGELOG.md](../CHANGELOG.md) under the new version.
+3. Make sure `api/schema.json` is current (`make api`) and that `make check` passes.
 
 ## Before committing
 

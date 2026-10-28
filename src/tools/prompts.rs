@@ -295,12 +295,15 @@ mod tests {
     /// Short ids of the commits `git blame` names for lines `start..=end` of `path` at `rev`.
     fn git_blame(root: &Path, rev: &str, path: &str, start: u32, end: u32) -> Vec<String> {
         let range = format!("{start},{end}");
+        // Full ids from the porcelain headers: `--abbrev` widths differ between git versions.
         git_stdout(
             root,
-            &["blame", "-s", "--abbrev=11", "-L", &range, rev, "--", path],
+            &["blame", "--porcelain", "-L", &range, rev, "--", path],
         )
         .lines()
-        .map(|line| line[..12].to_owned())
+        .filter_map(|line| line.split(' ').next())
+        .filter(|id| id.len() == 40 && id.bytes().all(|b| b.is_ascii_hexdigit()))
+        .map(|id| id[..12].to_owned())
         .collect()
     }
 

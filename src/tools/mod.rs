@@ -379,7 +379,20 @@ pub fn repo_file_path(path: &str) -> anyhow::Result<BString> {
 /// Caller-supplied pathspecs, passed to gix as-is so magic like `:(exclude)` keeps working.
 /// They're relative to the repository root because the server runs from there (see `RepoHandle::discover`).
 pub fn pathspec_patterns(pathspec: &[String]) -> Vec<BString> {
-    pathspec.iter().map(|p| BString::from(p.as_str())).collect()
+    pathspec
+        .iter()
+        .map(|p| BString::from(whole_tree_as_top(p)))
+        .collect()
+}
+
+/// `.` (or `./`) for the whole tree, spelled `:/` for gix. gix leaves a bare `.` unnormalized and
+/// matches it literally, so it matched nothing wherever pathspecs are case-sensitive (Linux). On
+/// macOS and Windows `core.ignoreCase` sends it down a matcher that copes. `:/` means the same from
+/// the root.
+fn whole_tree_as_top(pattern: &str) -> &str {
+    let only_dots =
+        pattern.starts_with('.') && pattern.split('/').all(|c| c.is_empty() || c == ".");
+    if only_dots { ":/" } else { pattern }
 }
 
 /// A pathspec search over `pathspec`, or `None` to include everything.
@@ -723,6 +736,11 @@ pub(crate) mod testutil {
             .current_dir(cwd)
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .env("GIT_CONFIG_NOSYSTEM", "1")
+            // Newer git runs `maintenance --auto` detached after commits, rebases and stashes; its
+            // lock files come and go under `.git` while `snapshot` walks it.
+            .env("GIT_CONFIG_COUNT", "1")
+            .env("GIT_CONFIG_KEY_0", "maintenance.auto")
+            .env("GIT_CONFIG_VALUE_0", "false")
             .env("GIT_AUTHOR_NAME", "Test")
             .env("GIT_AUTHOR_EMAIL", "test@example.com")
             .env("GIT_COMMITTER_NAME", "Test")
@@ -825,6 +843,50 @@ mod tests {
         let tag = resolve_object(&repo, Some("v2")).unwrap();
         assert_eq!(tag.object().unwrap().kind, gix::object::Kind::Tag);
         assert!(resolve_object(&repo, Some("nope")).is_err());
+    }
+
+    #[test]
+    fn dot_pathspecs_match_like_git_on_case_sensitive_filesystems() {
+        use crate::tools::testutil::{git_stdout, open, run_git, write};
+        let (dir, _) = fixture_repo();
+        let root = dir.path();
+        write(root, "dir/b.txt", "b\n");
+        run_git(root, &["add", "."]);
+        // macOS fixtures default to `core.ignoreCase=true`, which hid this: Linux is case-sensitive.
+        run_git(root, &["config", "core.ignoreCase", "false"]);
+        let repo = open(root);
+        let index = repo.index_or_empty().unwrap();
+        for pattern in [
+            ".",
+            "./",
+            ".//./",
+            "./a.txt",
+            "dir/.",
+            "dir/./b.txt",
+            "./dir",
+            "dir/",
+            ":(exclude)./a.txt",
+            ":!.",
+            ":(top).",
+            "*.txt",
+        ] {
+            let mut spec = pathspec_search(&repo, &[pattern.to_owned()], &index)
+                .unwrap()
+                .unwrap();
+            let ours: Vec<String> = index
+                .entries()
+                .iter()
+                .map(|e| e.path(&index))
+                .filter(|p| spec.is_included(*p, Some(false)))
+                .map(ToString::to_string)
+                .collect();
+            let git = git_stdout(root, &["ls-files", "--", pattern]);
+            assert_eq!(
+                ours,
+                git.lines().collect::<Vec<_>>(),
+                "pathspec `{pattern}`"
+            );
+        }
     }
 
     #[test]

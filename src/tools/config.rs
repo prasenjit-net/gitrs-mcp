@@ -323,7 +323,8 @@ mod tests {
     fn listing_matches_git_config() {
         let (dir, repo) = configured_repo();
         let res = config_get(&repo, args(None, None)).unwrap();
-        assert_eq!(rows(&res), git_config(dir.path(), &["--list"]));
+        // `--local`: the test helpers also hand git a setting through the environment.
+        assert_eq!(rows(&res), git_config(dir.path(), &["--list", "--local"]));
         assert!(
             res.entries
                 .iter()

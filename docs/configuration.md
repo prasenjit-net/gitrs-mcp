@@ -95,7 +95,7 @@ Claude Desktop has no documented Linux location, so setup doesn't support it the
 | `--yes` | Don't ask for confirmation. |
 | `--force` | Replace an existing entry of the same name that differs. Without it setup refuses and shows both. |
 | `--status` | Show where the server is registered, and flag entries whose command no longer exists (after an uninstall, say). |
-| `--remove` | Remove the entry. |
+| `--remove` | Remove the entry the way it was added. Alone, it removes it from every agent and scope where it is registered, without prompting for a choice; add `--client` to limit it, `--dry-run` to preview. |
 | `--print` | Print the entry for one `--client` to add by hand. Changes nothing. |
 
 On a terminal, setup finds the agents, shows a checklist, asks about write tools, lists exactly what will change and asks to confirm. Without a terminal it never asks: pass `--client` or `--all` (and `--yes` is implied).

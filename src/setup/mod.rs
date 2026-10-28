@@ -98,7 +98,8 @@ pub struct SetupArgs {
     #[arg(long, conflicts_with_all = ["remove", "print"])]
     status: bool,
 
-    /// Remove the entry from the agents.
+    /// Remove the entry from the agents. With no --client, from every agent and scope where it is
+    /// registered, the way it was added.
     #[arg(long, conflicts_with = "print")]
     remove: bool,
 
@@ -201,7 +202,8 @@ fn pick_agents(
         .iter()
         .filter(|agent| op != Op::Add || (agent.detect)(env))
         .collect();
-    if args.all || op == Op::Status {
+    // Removing undoes only our own entry, so with no agent named it simply covers every agent.
+    if args.all || op != Op::Add {
         anyhow::ensure!(
             !candidates.is_empty(),
             "no supported agent was found on this machine; name one with --client (claude-code, claude-desktop, cursor, vscode, codex)"
@@ -811,6 +813,19 @@ mod tests {
             out.contains("removed `gitrs`") && !out.contains("not registered"),
             "{out}"
         );
+    }
+
+    #[test]
+    fn remove_alone_undoes_every_registration() {
+        let machine = Machine::new(Os::Linux);
+        machine.ok("--client cursor --client codex --yes");
+        machine.ok("--client vscode --scope project --yes");
+        let out = machine.ok("--remove");
+        assert_eq!(out.matches("removed `gitrs`").count(), 3, "{out}");
+        assert!(!machine.home(CURSOR).exists() && !machine.home(".codex/config.toml").exists());
+        assert!(!machine.env.cwd.join(".vscode/mcp.json").exists());
+        let out = machine.ok("--remove");
+        assert!(out.contains("isn't registered with any agent"), "{out}");
     }
 
     #[test]

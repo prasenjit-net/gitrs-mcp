@@ -1,6 +1,6 @@
 # Security
 
-gitrs-mcp gives an AI model access to Git repositories on your machine. This page describes what the model can and can't reach through it, and which tests enforce each guarantee. It's the outcome of the Phase 6 security review in the [roadmap](../ROADMAP.md).
+gitrs-mcp gives an AI model access to Git repositories on your machine. This page describes what the model can and can't reach through it, and which tests enforce each guarantee. It's the outcome of the security review done before the first release.
 
 ## Threat model
 

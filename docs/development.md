@@ -96,7 +96,7 @@ A tool is one function and one wrapper. Using a made-up `describe` tool as the e
 
 5. **Test it** in the same file (see below), and add a call to `scripts/smoke.sh`. If the call needs something the served repository may not have (a tag, a merge in progress), ask for something that can't exist and add the request id to `expect_error`: the smoke test then requires that call to return a tool error.
 
-6. **Document it** in the same change: a section in [tools.md](tools.md) with an example taken from real output (build the demo workspace with `scripts/demo-repo.sh <new dir>` and call the tool on the repository it creates, for example with `make inspector REPO=<dir>/demo`), a row in the README's tool table, and the tool marked done in [ROADMAP.md](../ROADMAP.md).
+6. **Document it** in the same change: a section in [tools.md](tools.md) with an example taken from real output (build the demo workspace with `scripts/demo-repo.sh <new dir>` and call the tool on the repository it creates, for example with `make inspector REPO=<dir>/demo`), a row in the README's tool table, and the work item marked done in [PLAN.md](../PLAN.md).
 
 7. **Record the API.** Run `make api` to add the tool to `api/schema.json`. The API test fails until you do, so the new schema shows up in review. Renaming or removing anything is a breaking change; see [versioning](versioning.md).
 

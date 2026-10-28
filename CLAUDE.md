@@ -1,6 +1,6 @@
 # gitrs-mcp: project instructions
 
-gitrs-mcp is a local-only Git MCP server in Rust, built on `gix` (gitoxide) and `rmcp`, speaking MCP over stdio. [ROADMAP.md](ROADMAP.md) has the plan and the tool specs. These rules apply to every change.
+gitrs-mcp is a local-only Git MCP server in Rust, built on `gix` (gitoxide) and `rmcp`, speaking MCP over stdio. [PLAN.md](PLAN.md) has the plan, and [docs/tools.md](docs/tools.md) has the tool specs. These rules apply to every change.
 
 ## 1. Code quality
 
@@ -37,7 +37,7 @@ The model only knows what the schema and descriptions tell it, so the documentat
   - `docs/architecture.md`: layers, data flow, the sync/async bridge, and the safety model.
   - `docs/development.md`: setup, the make targets, how to add a tool, testing and coverage.
   - `docs/configuration.md`: CLI flags, env vars, and client setup (Claude Code, Claude Desktop, others).
-- **ROADMAP.md.** Mark tools as done when they ship. Note any deviation from the planned design and the reason.
+- **PLAN.md.** Mark work items as done when they ship. Note any deviation from the planned design and the reason.
 - Examples in the docs must be real output from running the tool (for example via `make smoke` or `make inspector`), not invented.
 
 ## 4. Testing
@@ -60,7 +60,7 @@ Run, in order, and fix everything before committing:
 3. **Review the diff yourself** (`git diff --staged`). Look for:
    - duplicated logic, dead code, leftover debug output, `unwrap()` outside tests;
    - missing doc comments on tools or fields;
-   - README, docs/ or ROADMAP.md not updated;
+   - README, docs/ or PLAN.md not updated;
    - secrets, absolute local paths, or stray files (build output, scratch files).
 4. Commit with a message that says *what* changed and *why*, one logical change per commit.
 5. Push only when the user asks, and never force-push `master`.

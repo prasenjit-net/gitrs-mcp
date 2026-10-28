@@ -150,3 +150,24 @@ Results are meant to match the `git` CLI on the same repository, and the tests c
 - **Secrets stay out of output.** `config_get` and `list_submodules` replace values that may be secrets with `<redacted>`: anything under `credential`, keys named like a password, token or secret, `http.extraHeader`, and the password in any URL. Configuration that gix derives from environment variables isn't listed at all, as in `git config --list`.
 - **Bounded output.** Every list is paginated and every content field has a byte budget, so a single call can't flood the client's context.
 - **Errors for the model, not crashes.** Tool code returns errors instead of panicking (`unwrap` and `expect` are only allowed in tests), and every error message says what to change.
+
+## Known gix gaps and workarounds
+
+gitrs-mcp is built on gix 0.90. These are the places where gix is missing something or behaves differently from git, found while checking each tool against the git CLI, and what the code does about each. Re-check them when upgrading gix: a gap that is closed upstream lets the workaround be deleted.
+
+| Missing in gix | Impact | Workaround |
+|---|---|---|
+| Stash | `stash_*` tools | Implement the stash commit format ourselves (Phase 4). Reading `refs/stash` works today |
+| Sequencer (rebase, cherry-pick, revert state machine) | Phase 4 | Own minimal sequencer on `merge_trees`, writing git-compatible state files |
+| Hooks | `commit` skips `pre-commit`/`commit-msg` | Document it. Optional `--run-hooks` executes them as subprocesses |
+| Commit/tag signing | Signed commits | Out of scope at first. Maybe shell out to `gpg`/`ssh-keygen -Y sign` later |
+| Network | n/a | Intentionally excluded |
+| Copy detection drops a modified copy source (found in Phase 1) | With `diff.renames=copies`, a copy whose source was also modified is reported as a copy of the source's *new* content, and the source's own modification disappears | Worked around in `tools/diff.rs` (`repair_copies`): point the copy back at the old content and restore the source's change |
+| `status.renames` read from the wrong section (found in Phase 1) | gix looks the key up as `merge.renames`, so `status.renames` is ignored | Worked around in `tools/diff.rs` (`index_rename_tracking`): resolve `status.renames`, then `diff.renames`, ourselves |
+| Ignore matching only looks at the path itself (found in Phase 2) | `excludes()` → `at_entry()` reports no rule for `target/foo.rs` when `target/` is ignored; git ignores everything below an ignored directory | `tools/attributes.rs` (`deciding_rule`) checks each parent directory first, as git does |
+| Environment variables appear as configuration (found in Phase 2) | The config snapshot contains values gix derives from `GIT_EDITOR`, `HTTPS_PROXY` and others (some under `gitoxide.*` keys), which `git config --list` doesn't show | `config_get` leaves out `Source::EnvOverride` sections |
+| `key =` and a bare `key` look the same when iterating config (found in Phase 2) | The section iterator yields an empty value for both, but git reads the first as the empty string and the second as `true` | `config_get` asks `value_implicit` for empty values |
+| Index writes keep a stale cache-tree (found in Phase 3) | `gix_index::File::write` writes the `TREE` extension unchanged after entries change, so a later `git commit` could record outdated subtrees ([gitoxide#2421](https://github.com/GitoxideLabs/gitoxide/issues/2421)) | `update_index` writes only the end-of-index-entry extension; git rebuilds the rest |
+| A bare `.` pathspec is matched literally (found in Phase 6) | gix leaves `.` and `./` unnormalized, so with case-sensitive matching (Linux) they match nothing: `restore` and `reset` with `paths: ["."]` failed. macOS hid it, since `core.ignoreCase` routes matching elsewhere | `pathspec_patterns` passes whole-tree patterns as `:/` |
+| Blame doesn't know about shallow clones (found in Phase 6) | `blame_file` follows a boundary commit's recorded parents, which aren't there, and fails; git attributes the remaining lines to the boundary commit | `blame` explains the cause and suggests `git fetch --unshallow`. History walks and `parents` use `visible_parents`, which treats boundary commits as roots, as git does |
+| Unified diff output differs from git (found in Phase 1) | gix's unified-diff helpers print `,1` ranges and no function context, and its default line input strips terminators, which loses `\ No newline at end of file` | Own hunk writer in `tools/diff.rs` on top of gix's line diff |

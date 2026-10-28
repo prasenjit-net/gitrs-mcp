@@ -187,7 +187,7 @@ pub fn read(repo: &gix::Repository, uri: &str) -> anyhow::Result<Contents> {
         Address::File { rev, path } => file(repo, rev, path),
         Address::Diff { from, to } => Ok(Contents {
             mime_type: "text/x-diff",
-            body: Body::Text(diff_text(repo, &from, &to)?),
+            body: Body::Text(render(&diff(repo, diff_args(&from, &to, MAX_MAX_BYTES)?)?)),
         }),
     }
 }
@@ -229,7 +229,8 @@ fn commit_text(repo: &gix::Repository, rev: &str) -> anyhow::Result<String> {
         Some(parent) => parent.clone(),
         None => repo.empty_tree().id.to_string(),
     };
-    let patch = render(diff(repo, patch_args(Some(from), Some(detail.id), false))?);
+    let args = patch_args(Some(from), Some(detail.id), false, MAX_MAX_BYTES);
+    let patch = render(&diff(repo, args)?);
     if !patch.is_empty() {
         text.push('\n');
         text.push_str(&patch);
@@ -237,19 +238,28 @@ fn commit_text(repo: &gix::Repository, rev: &str) -> anyhow::Result<String> {
     Ok(text)
 }
 
-fn diff_text(repo: &gix::Repository, from: &str, to: &str) -> anyhow::Result<String> {
-    let args = match (from, to) {
-        ("index", "worktree") => patch_args(None, None, false),
+/// Patch-format arguments for the sides `from..to`: two revisions, a revision and `index`, or
+/// `index..worktree`. Patch text stops at `max_bytes`.
+pub fn diff_args(from: &str, to: &str, max_bytes: usize) -> anyhow::Result<DiffArgs> {
+    Ok(match (from, to) {
+        ("index", "worktree") => patch_args(None, None, false, max_bytes),
         ("index" | "worktree", _) | (_, "worktree") => bail!(
             "unsupported diff `{from}..{to}`; use `<rev>..<rev>`, `<rev>..index` or `index..worktree`"
         ),
-        (_, "index") => patch_args(Some(from.to_owned()), None, true),
-        _ => patch_args(Some(from.to_owned()), Some(to.to_owned()), false),
-    };
-    Ok(render(diff(repo, args)?))
+        // Leaving HEAD to the diff tool's default lets it stand for the empty tree before the first
+        // commit, so the staged changes of a new repository still read.
+        ("HEAD", "index") => patch_args(None, None, true, max_bytes),
+        (_, "index") => patch_args(Some(from.to_owned()), None, true, max_bytes),
+        _ => patch_args(Some(from.to_owned()), Some(to.to_owned()), false, max_bytes),
+    })
 }
 
-fn patch_args(from: Option<String>, to: Option<String>, staged: bool) -> DiffArgs {
+pub fn patch_args(
+    from: Option<String>,
+    to: Option<String>,
+    staged: bool,
+    max_bytes: usize,
+) -> DiffArgs {
     DiffArgs {
         from,
         to,
@@ -257,7 +267,7 @@ fn patch_args(from: Option<String>, to: Option<String>, staged: bool) -> DiffArg
         pathspec: Vec::new(),
         format: DiffFormat::Patch,
         context_lines: None,
-        max_bytes: Some(MAX_MAX_BYTES),
+        max_bytes: Some(max_bytes),
         limit: Some(MAX_FILES),
         skip: None,
     }
@@ -265,7 +275,7 @@ fn patch_args(from: Option<String>, to: Option<String>, staged: bool) -> DiffArg
 
 /// Every file's patch in order, then a note on anything the byte or file budget left out. git apply
 /// ignores text after the last hunk, so the note doesn't break the patch.
-fn render(result: DiffResult) -> String {
+pub fn render(result: &DiffResult) -> String {
     let mut text: String = result
         .files
         .iter()
@@ -448,7 +458,7 @@ mod tests {
 
     use super::*;
     use crate::tools::testutil::{
-        bare_repo, fixture_repo, git_stdout, open, run_git, try_git, write,
+        bare_repo, empty_repo, fixture_repo, git_stdout, open, run_git, try_git, write,
     };
 
     fn text(contents: Contents) -> String {
@@ -548,6 +558,17 @@ mod tests {
                 "{bad}"
             );
         }
+    }
+
+    #[test]
+    fn staged_changes_read_before_the_first_commit() {
+        let (dir, repo) = empty_repo();
+        write(dir.path(), "first.txt", "hello\n");
+        run_git(dir.path(), &["add", "first.txt"]);
+        assert_eq!(
+            read_text(&repo, "gitrs://diff/HEAD..index"),
+            git_stdout(dir.path(), &["diff", "--cached"])
+        );
     }
 
     #[test]

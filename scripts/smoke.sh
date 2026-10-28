@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # End-to-end MCP check over stdio: initialize, list tools, call every read tool once, list and read
-# resources and complete an argument, then start a second session with --allow-write and check the
+# resources, complete an argument and get prompts, then start a second session with --allow-write and check the
 # write tools appear only there.
 # Usage: scripts/smoke.sh <path-to-gitrs-mcp-binary> <repo> [file]
 # `file` is a tracked file for read_file, blame and file_history (default README.md).
@@ -54,9 +54,13 @@ requests=(
   '{"jsonrpc":"2.0","id":33,"method":"resources/read","params":{"uri":"gitrs://file/HEAD/'"$file"'"}}'
   '{"jsonrpc":"2.0","id":34,"method":"resources/read","params":{"uri":"gitrs://commit/gitrs-smoke-no-such-rev"}}'
   '{"jsonrpc":"2.0","id":35,"method":"completion/complete","params":{"ref":{"type":"ref/resource","uri":"gitrs://commit/{rev}"},"argument":{"name":"rev","value":"H"}}}'
+  '{"jsonrpc":"2.0","id":36,"method":"prompts/list"}'
+  '{"jsonrpc":"2.0","id":37,"method":"prompts/get","params":{"name":"explain_history","arguments":{"path":"'"$file"'","limit":"3"}}}'
+  # HEAD..HEAD has nothing to review, whatever the repository holds.
+  '{"jsonrpc":"2.0","id":38,"method":"prompts/get","params":{"name":"review_changes","arguments":{"from":"HEAD","to":"HEAD"}}}'
 )
-last_id=35
-expect_error='17 34' # space-separated request ids that must fail: a tool error, or a protocol error
+last_id=38
+expect_error='17 34 38' # space-separated request ids that must fail: a tool error, or a protocol error
 
 write_tools='create_branch delete_branch rename_branch create_tag stage unstage commit reset restore switch clean stash_push stash_pop stash_drop merge cherry_pick revert rebase continue_operation abort_operation worktree_add worktree_remove'
 write_requests=(

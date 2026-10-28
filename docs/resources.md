@@ -1,8 +1,12 @@
-# Resources and completion
+# Resources, prompts and completion
 
-Besides tools, gitrs-mcp serves repository content as MCP **resources**: commits, files and diffs addressed by `gitrs://` URIs. A client can attach them to a conversation as context without the model calling a tool. Clients that support **completion** can also suggest revisions and paths while you fill in a resource's URI.
+Besides tools, gitrs-mcp offers three other MCP features:
 
-Resources are read-only and available with or without `--allow-write`.
+- **Resources:** repository content (commits, files and diffs) addressed by `gitrs://` URIs. A client can attach them to a conversation as context without the model calling a tool.
+- **Prompts:** ready-made requests, such as "write a commit message", that come filled in with the repository data they need. Clients usually offer them as slash commands.
+- **Completion:** suggestions for revisions and paths while you fill in a resource URI or a prompt argument.
+
+All three are read-only and available with or without `--allow-write`.
 
 ## Listed resources
 
@@ -116,9 +120,94 @@ Run against the demo repository from `scripts/demo-repo.sh`.
 }
 ```
 
+## Prompts
+
+`prompts/list` returns three prompts. `prompts/get` returns one user message with the instructions and the data filled in. Code and diffs are inside Markdown code fences, which are longer than any backtick run in the content. Prompt arguments are strings, as MCP defines them.
+
+| Prompt | Arguments | Fills in |
+|---|---|---|
+| `write_commit_message` | none | The staged diff (`git diff --cached`) and the subjects of the last 10 commits as a style guide (none before the first commit) |
+| `review_changes` | `from?` (default `HEAD`), `to?` (default `index`) | The diff between the two sides, and the blame of the lines each hunk replaces |
+| `explain_history` | `path`, `limit?` (default 20, max 100) | The file's commits, following renames, and the full message and patch of the 10 most recent |
+
+- **`review_changes`**
+  - The sides are the pairs the [diff resource](#templates) supports. The default `HEAD..index` reviews the staged changes, and `from: index, to: worktree` the unstaged ones.
+  - For each modified or renamed file (up to 20 files and 10 hunks each), it blames the old lines of every hunk, including the hunk's context lines, at `from`. When `from` is `index`, it blames at `HEAD` instead, since the index isn't a commit. Each blamed range names the commit, its summary, author and date, so the review can check that the change fits the original intent.
+- **Budgets.** Patch text in a prompt stops at 128 KiB. `explain_history` stops adding patches once the budget runs out, and says so.
+
+### Errors
+
+A prompt that can't be built comes back as a JSON-RPC error with code `-32602` (invalid params). The message says what to change:
+
+- nothing is staged, for `write_commit_message`;
+- no changes between the two sides, or an unsupported pair, for `review_changes`;
+- a path with no history, or a `limit` that isn't a positive number, for `explain_history`;
+- a revision that doesn't resolve.
+
+### Examples
+
+Run against the demo repository from `scripts/demo-repo.sh`, which has `src/main.rs` staged and an unstaged edit to `src/lib.rs`.
+
+```json
+{"method": "prompts/get", "params": {"name": "write_commit_message"}}
+```
+
+```json
+{
+  "description": "Commit message for the staged changes",
+  "messages": [
+    {
+      "role": "user",
+      "content": {
+        "type": "text",
+        "text": "Write a git commit message for the staged changes below. Start with a summary line of about 50 characters in the imperative mood, then a blank line and a body, wrapped at 72 columns, that explains what changed and why. Reply with the message only.\n\nMatch the style of this repository's recent commit subjects:\n\n- Document usage\n- Add shout\n- Initial commit\n\nStaged changes (`git diff --cached`):\n\n```diff\ndiff --git a/src/main.rs b/src/main.rs\nnew file mode 100644\nindex 0000000..fa49d50\n--- /dev/null\n+++ b/src/main.rs\n@@ -0,0 +1,3 @@\n+fn main() {\n+    println!(\"{}\", greet::greet(\"world\"));\n+}\n```\n"
+      }
+    }
+  ]
+}
+```
+
+```json
+{"method": "prompts/get", "params": {"name": "review_changes", "arguments": {"from": "index", "to": "worktree"}}}
+```
+
+```json
+{
+  "description": "Code review of a diff, with blame context",
+  "messages": [
+    {
+      "role": "user",
+      "content": {
+        "type": "text",
+        "text": "Review the changes below (`index..worktree`) as an experienced reviewer would. Point out bugs, unhandled edge cases, security problems, and code that is hard to read or maintain, citing file and line. Then say briefly what is good about the change. The blame shows which commits last touched the lines each hunk replaces; use their summaries to judge whether the change respects the original intent.\n\nDiff:\n\n```diff\ndiff --git a/src/lib.rs b/src/lib.rs\nindex b1a7078..de41029 100644\n--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1,5 +1,5 @@\n pub fn greet(name: &str) -> String {\n-    format!(\"Hello, {name}!\")\n+    format!(\"Hello, {name}!!\")\n }\n \n pub fn shout(name: &str) -> String {\n```\n\nBlame of the replaced lines, at `HEAD`:\n\n- src/lib.rs lines 1-3: 73656d92804c \"Initial commit\" by Ada Lovelace, 2026-10-01\n- src/lib.rs lines 4-5: 41dad034dd46 \"Add shout\" by Ada Lovelace, 2026-10-02\n"
+      }
+    }
+  ]
+}
+```
+
+```json
+{"method": "prompts/get", "params": {"name": "explain_history", "arguments": {"path": "src/lib.rs", "limit": "5"}}}
+```
+
+```json
+{
+  "description": "How a file evolved, from its history",
+  "messages": [
+    {
+      "role": "user",
+      "content": {
+        "type": "text",
+        "text": "Explain how `src/lib.rs` evolved and why, using its history below: the main phases of its development, the reasons behind significant changes (from the commit messages), and anything a newcomer should know before changing it.\n\nCommits that changed it, newest first:\n\n- 41dad03 modified: \"Add shout\" by Ada Lovelace, 2026-10-02\n- 73656d9 added: \"Initial commit\" by Ada Lovelace, 2026-10-01\n\nThe most recent changes in detail:\n\n### 41dad03 by Ada Lovelace, 2026-10-02\n\nAdd shout\n\nUppercase variant of greet.\n\n```diff\ndiff --git a/src/lib.rs b/src/lib.rs\nindex 4aacacf..b1a7078 100644\n--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1,3 +1,7 @@\n pub fn greet(name: &str) -> String {\n     format!(\"Hello, {name}!\")\n }\n+\n+pub fn shout(name: &str) -> String {\n+    greet(name).to_uppercase()\n+}\n```\n\n### 73656d9 by Ada Lovelace, 2026-10-01\n\nInitial commit\n\n```diff\ndiff --git a/src/lib.rs b/src/lib.rs\nnew file mode 100644\nindex 0000000..4aacacf\n--- /dev/null\n+++ b/src/lib.rs\n@@ -0,0 +1,3 @@\n+pub fn greet(name: &str) -> String {\n+    format!(\"Hello, {name}!\")\n+}\n```\n"
+      }
+    }
+  ]
+}
+```
+
 ## Completion
 
-`completion/complete` suggests values for an argument from what has been typed so far. Values are sorted, prefix-matched and capped at 100; `total` counts every match, and `hasMore` says whether some were left out.
+`completion/complete` suggests values for an argument of a resource template or a prompt, from what has been typed so far. Values are sorted, prefix-matched and capped at 100; `total` counts every match, and `hasMore` says whether some were left out.
 
 | Argument | Suggestions |
 |---|---|

@@ -19,6 +19,7 @@ pub mod integrate;
 pub mod merge;
 pub mod notes;
 pub mod objects;
+pub mod prompts;
 pub mod rebase;
 pub mod reflog;
 pub mod refs;

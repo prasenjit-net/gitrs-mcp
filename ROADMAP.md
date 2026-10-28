@@ -13,7 +13,7 @@ _Last updated 2026-10-27._
 | 2 Deep read and inspection | ✅ Done: 14 tools, each checked against the git CLI |
 | 3 Safe writes | ✅ Done: 10 tools behind `--allow-write`, each checked against the git CLI |
 | 4 History rewriting | ✅ Done: 12 tools behind `--allow-write`, each checked against the git CLI, with git and gitrs-mcp able to continue each other's operations |
-| 5 MCP-native extras | 🚧 In progress: resources and completion |
+| 5 MCP-native extras | 🚧 In progress: resources, completion and prompts are done |
 | 6 Hardening and release | Planned |
 
 The server has 27 read-only tools, plus 22 write tools registered only with `--allow-write`. 220 unit tests and the end-to-end smoke test pass, with 96.2% line coverage.
@@ -347,7 +347,7 @@ gix has no sequencer, so this phase is where we build our own logic on its primi
 - **Resources.** ✅
   - `gitrs://commit/{id}`, `gitrs://file/{rev}/{path}`, `gitrs://diff/{from}..{to}`, so clients can attach repo content as context.
   - Resource templates plus `completion` for revs and paths.
-- **Prompts.**
+- **Prompts.** ✅
   - `write_commit_message`: fills in the staged diff.
   - `review_changes`: diff plus surrounding blame.
   - `explain_history`: file history for a path.
@@ -367,7 +367,13 @@ gix has no sequencer, so this phase is where we build our own logic on its primi
   - A merge commit's patch is against its first parent, not git's combined diff, so that it applies.
   - `file` takes `index` and `worktree` as revisions, like `read_file`. `diff` supports `<rev>..<rev>`, `<rev>..index` and `index..worktree`; a revision against the working tree isn't supported, as in the `diff` tool.
   - Resources can't be paged. Files over 1 MiB are refused, with a pointer to `read_file`. Diffs stop at 1,000 files and 1 MiB of patch text, with a closing note saying what was left out.
-- **Completion.** `rev`, `from` and `to` complete from `HEAD` and ref short names, plus `index`/`worktree` where they're valid. `path` completes one directory level at a time against the context revision. Completion errors give no values, since a half-typed context revision is normal.
+- **Prompts.**
+  - Each prompt returns one user message holding the instructions and the data, with code inside Markdown fences longer than any backtick run in it. Prompt arguments are strings in MCP, so `explain_history`'s `limit` is parsed and refused with a clear message when it isn't a positive number.
+  - `write_commit_message` also lists the last 10 commit subjects as a style guide, and refuses when nothing is staged.
+  - `review_changes` takes `from`/`to` with the diff resource's pairs (default the staged changes). "Surrounding blame" became the blame of each hunk's old lines, context included, at `from`, or at HEAD for `index..worktree`. Pure additions have nothing to blame and are skipped.
+  - `explain_history` follows renames and includes the full message and patch of the 10 most recent commits, within a 128 KiB patch budget.
+  - Found while testing: `gitrs://diff/HEAD..index` failed before the first commit. HEAD now goes to the diff tool's default, which treats an unborn HEAD as the empty tree.
+- **Completion.** Prompt arguments complete too: `rev`, `from` and `to` complete from `HEAD` and ref short names, plus `index`/`worktree` where they're valid. `path` completes one directory level at a time against the context revision. Completion errors give no values, since a half-typed context revision is normal.
 
 ---
 

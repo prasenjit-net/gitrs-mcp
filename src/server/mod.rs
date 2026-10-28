@@ -7,6 +7,7 @@
 mod changes;
 mod files;
 mod history;
+mod prompts;
 mod repo;
 mod resources;
 mod setup;
@@ -14,12 +15,13 @@ mod write;
 
 use rmcp::{
     ErrorData as McpError, RoleServer, ServerHandler,
-    handler::server::router::tool::ToolRouter,
+    handler::server::router::{prompt::PromptRouter, tool::ToolRouter},
     model::{
         CompleteRequestParams, CompleteResult, Implementation, ListResourceTemplatesResult,
         ListResourcesResult, PaginatedRequestParams, ReadResourceRequestParams,
         ReadResourceResponse, ServerCapabilities, ServerConfig,
     },
+    prompt_handler,
     service::RequestContext,
     tool_handler,
 };
@@ -37,6 +39,7 @@ pub struct GitServer {
     repo: RepoHandle,
     policy: Policy,
     tool_router: ToolRouter<Self>,
+    prompt_router: PromptRouter<Self>,
 }
 
 impl GitServer {
@@ -54,15 +57,18 @@ impl GitServer {
             repo,
             policy,
             tool_router,
+            prompt_router: Self::prompts_router(),
         }
     }
 }
 
 #[tool_handler(router = self.tool_router)]
+#[prompt_handler(router = self.prompt_router)]
 impl ServerHandler for GitServer {
     fn get_info(&self) -> ServerConfig {
         let capabilities = ServerCapabilities::builder()
             .enable_tools()
+            .enable_prompts()
             .enable_resources()
             .enable_completions()
             .build();
@@ -213,6 +219,60 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(found.completion.values, ["v1"]);
+        client.cancel().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn prompts_over_the_protocol() {
+        use rmcp::model::{ErrorCode, GetPromptRequestParams};
+        let (dir, _) = fixture_repo();
+        let client = connect(dir.path(), false).await;
+        let prompts = client.list_all_prompts().await.unwrap();
+        let names: Vec<_> = prompts.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(
+            names,
+            ["explain_history", "review_changes", "write_commit_message"]
+        );
+        let history = &prompts[0];
+        let required: Vec<_> = history
+            .arguments
+            .iter()
+            .flatten()
+            .map(|a| (a.name.as_str(), a.required))
+            .collect();
+        assert!(required.contains(&("path", Some(true))));
+        assert!(required.contains(&("limit", Some(false))));
+
+        let mut arguments = serde_json::Map::new();
+        arguments.insert("path".into(), "a.txt".into());
+        let got = client
+            .get_prompt(GetPromptRequestParams::new("explain_history").with_arguments(arguments))
+            .await
+            .unwrap();
+        let text = serde_json::to_value(&got.messages).unwrap()[0]["content"]["text"].clone();
+        assert!(text.as_str().unwrap().contains("\"second commit\""));
+
+        let mut sides = serde_json::Map::new();
+        sides.insert("from".into(), "HEAD~1".into());
+        sides.insert("to".into(), "HEAD".into());
+        let review = client
+            .get_prompt(GetPromptRequestParams::new("review_changes").with_arguments(sides))
+            .await
+            .unwrap();
+        let text = serde_json::to_value(&review.messages).unwrap()[0]["content"]["text"].clone();
+        assert!(text.as_str().unwrap().contains("+two"));
+
+        let refused = client
+            .get_prompt(GetPromptRequestParams::new("write_commit_message"))
+            .await
+            .unwrap_err();
+        match refused {
+            rmcp::ServiceError::McpError(e) => {
+                assert_eq!(e.code, ErrorCode::INVALID_PARAMS);
+                assert!(e.message.contains("nothing is staged"));
+            }
+            other => panic!("expected an MCP error, got {other:?}"),
+        }
         client.cancel().await.unwrap();
     }
 

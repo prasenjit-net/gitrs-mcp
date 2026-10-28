@@ -12,14 +12,29 @@ It lets AI assistants inspect a Git repository through typed tools with structur
 - **Context to attach.** Commits, files and diffs are also served as `gitrs://` resources (for example the staged changes), with completion of revisions and paths. Prompts such as `write_commit_message` and `review_changes` come filled in with the diff they need.
 - **Pure Rust.** It runs as a single static binary that speaks MCP over stdio, and it doesn't need `libgit2` or the `git` executable.
 
-> **Status:** early development. Phases 0–5 of the [roadmap](ROADMAP.md) are done: 28 read-only tools covering status, diffs, merge previews and conflicts, file contents, code search, ignore and attribute rules, history, blame, refs, tags, reflogs, stashes, notes, worktrees, submodules, config and object stats; and, with `--allow-write`, 22 write tools for the local edit, stage, commit and branch loop, plus merges, cherry-picks, reverts, rebases, stashes, hard resets, `clean` and worktrees. Merges and rebases that stop on conflicts leave git's own state, so you can finish them with either gitrs-mcp or git. On top of the tools come `gitrs://` resources, prompts, completion, progress and cancellation, change notifications (`--watch`), and several repositories per server.
+> **Status:** all six phases of the [roadmap](ROADMAP.md) are done, and 0.1.0 is ready to release: 28 read-only tools covering status, diffs, merge previews and conflicts, file contents, code search, ignore and attribute rules, history, blame, refs, tags, reflogs, stashes, notes, worktrees, submodules, config and object stats; and, with `--allow-write`, 22 write tools for the local edit, stage, commit and branch loop, plus merges, cherry-picks, reverts, rebases, stashes, hard resets, `clean` and worktrees. Merges and rebases that stop on conflicts leave git's own state, so you can finish them with either gitrs-mcp or git. On top of the tools come `gitrs://` resources, prompts, completion, progress and cancellation, change notifications (`--watch`), and several repositories per server.
 
 ## Install
 
-You need Rust 1.85+ (edition 2024).
+Once the first release is published, prebuilt binaries for macOS, Linux and Windows are attached to each [GitHub release](https://github.com/prasenjit-net/gitrs-mcp/releases), with installers:
 
 ```sh
-# straight from GitHub
+# macOS and Linux
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/prasenjit-net/gitrs-mcp/releases/latest/download/gitrs-mcp-installer.sh | sh
+
+# Windows (PowerShell)
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/prasenjit-net/gitrs-mcp/releases/latest/download/gitrs-mcp-installer.ps1 | iex"
+
+# Homebrew
+brew install prasenjit-net/tap/gitrs-mcp
+
+# crates.io (needs Rust 1.89+)
+cargo install gitrs-mcp
+```
+
+Until then, build it from source with Rust 1.89 or newer:
+
+```sh
 cargo install --git https://github.com/prasenjit-net/gitrs-mcp.git
 
 # or from a clone
@@ -52,7 +67,7 @@ claude mcp add gitrs -- gitrs-mcp --repo /path/to/repo
 
 From a clone, `make mcp-add REPO=/path/to/repo` builds a release binary and registers it.
 
-### Claude Desktop and other MCP clients
+### Claude Desktop, VS Code, Cursor and other MCP clients
 
 ```json
 {
@@ -65,7 +80,7 @@ From a clone, `make mcp-add REPO=/path/to/repo` builds a release binary and regi
 }
 ```
 
-Setup for other clients, logging, and the git settings that affect results are in [docs/configuration.md](docs/configuration.md).
+Copy-paste setup for Claude Code, Claude Desktop, VS Code and Cursor, logging, and the git settings that affect results are in [docs/configuration.md](docs/configuration.md).
 
 ## Tools
 

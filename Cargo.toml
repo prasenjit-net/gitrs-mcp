@@ -2,6 +2,16 @@
 name = "gitrs-mcp"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.89"
+description = "A local-only Git MCP server built on gitoxide: structured, git-compatible tools, resources and prompts for AI assistants"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/prasenjit-net/gitrs-mcp"
+homepage = "https://github.com/prasenjit-net/gitrs-mcp"
+readme = "README.md"
+keywords = ["git", "mcp", "gitoxide", "ai", "llm"]
+categories = ["development-tools", "command-line-utilities"]
+# Keep the published crate to what builds it; tests, fuzzing and docs stay in the repository.
+include = ["src/**/*.rs", "Cargo.toml", "Cargo.lock", "README.md", "CHANGELOG.md", "LICENSE-*"]
 
 [dependencies]
 anyhow = "1.0.104"
@@ -24,3 +34,8 @@ tempfile = "3.27.0"
 proptest = "1.12.0"
 # An MCP client, so tests can drive the server through the real protocol, in process or as a child.
 rmcp = { version = "3.7.0", features = ["client", "transport-child-process"] }
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"

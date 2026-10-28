@@ -6,7 +6,7 @@ How to build, test and extend gitrs-mcp. The project rules (code quality, MCP do
 
 You need:
 
-- **Rust 1.85 or newer** (the crate uses edition 2024).
+- **Rust 1.89 or newer**, the minimum the dependencies need (`rust-version` in `Cargo.toml`, checked in CI).
 - **`git`** on your `PATH`. The server itself never runs it, but the tests use it to build fixture repositories and as an oracle for the expected output.
 - **`python3`** for the smoke test, which parses the server's JSON-RPC output.
 - **cargo-llvm-cov** for coverage:
@@ -174,9 +174,20 @@ On a clone of git.git (82,605 commits, git 2.50.1, Apple M-series laptop, 5 runs
 
 ## Releasing
 
+Releases are built by [cargo-dist](https://github.com/axodotdev/cargo-dist). Its configuration is in `dist-workspace.toml`, and `.github/workflows/release.yml` is generated from it; regenerate the workflow with `dist generate` after changing the config, rather than editing it by hand. CI (`.github/workflows/ci.yml`) runs `make check` on Linux and macOS, `make coverage`, and a build with the minimum supported Rust version, 1.89.
+
+Before the first release, set up the publishing targets once:
+
+- **Homebrew.** Create the `prasenjit-net/homebrew-tap` repository on GitHub. Then add a repository secret `HOMEBREW_TAP_TOKEN` to gitrs-mcp: a token that can push to the tap. The release workflow commits the formula there.
+- **crates.io.** Run `cargo login` with an API token. `cargo publish --dry-run` checks the package; its contents are limited by `include` in `Cargo.toml`.
+
+For each release:
+
 1. Set the version in `Cargo.toml`, following [versioning](versioning.md).
 2. Move the `Unreleased` entries in [CHANGELOG.md](../CHANGELOG.md) under the new version.
-3. Make sure `api/schema.json` is current (`make api`) and that `make check` passes.
+3. Make sure `api/schema.json` is current (`make api`), and that `make check` and `dist plan` pass.
+4. Commit, then tag and push: `git tag v0.1.0 && git push origin v0.1.0`. The release workflow builds the binaries for macOS (Apple Silicon and Intel), Linux (x86_64 and arm64) and Windows. It then creates the GitHub release with the shell and PowerShell installers, and pushes the Homebrew formula.
+5. Publish the crate: `cargo publish`.
 
 ## Before committing
 

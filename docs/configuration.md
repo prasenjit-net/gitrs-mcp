@@ -57,7 +57,7 @@ Nothing here makes the server touch the network.
 
 ## Client setup
 
-Each client starts its own server process. Point `--repo` at the repository you want the assistant to work with. With several repositories, register one server per repository under different names.
+Each client starts its own server process over stdio. Point `--repo` at the repository the assistant should work with. Repeat it to serve several, or rely on the client's roots: clients that send their open workspace folders as MCP roots get those repositories served automatically. If the client can't find `gitrs-mcp` on its `PATH`, use the binary's absolute path, for example `/Users/you/.cargo/bin/gitrs-mcp`.
 
 ### Claude Code
 
@@ -65,11 +65,11 @@ Each client starts its own server process. Point `--repo` at the repository you 
 claude mcp add gitrs -- gitrs-mcp --repo /path/to/repo
 ```
 
-Add `--scope project` to share the configuration with your team through a `.mcp.json` file in the repository. From a clone of gitrs-mcp, `make mcp-add REPO=/path/to/repo` builds a release binary and registers it in one step. Check the registration with `claude mcp list`.
+Add `--scope project` to share the configuration with your team through a `.mcp.json` file in the repository. Add `--allow-write` after `--repo` to enable the write tools, and `--watch` for resource change notifications. From a clone of gitrs-mcp, `make mcp-add REPO=/path/to/repo` builds a release binary and registers it in one step. Check the registration with `claude mcp list`.
 
 ### Claude Desktop
 
-Add the server to `claude_desktop_config.json` (on macOS, `~/Library/Application Support/Claude/claude_desktop_config.json`; on Windows, `%APPDATA%\Claude\claude_desktop_config.json`), then restart Claude Desktop:
+Add the server to `claude_desktop_config.json`, then restart Claude Desktop. The file is at `~/Library/Application Support/Claude/claude_desktop_config.json` on macOS, and `%APPDATA%\Claude\claude_desktop_config.json` on Windows.
 
 ```json
 {
@@ -83,11 +83,9 @@ Add the server to `claude_desktop_config.json` (on macOS, `~/Library/Application
 }
 ```
 
-Use the absolute path of the binary (for example `~/.cargo/bin/gitrs-mcp`, written out in full) if Claude Desktop can't find it on its `PATH`.
+### VS Code
 
-### Other MCP clients
-
-Any client that can launch a stdio MCP server works. Configure it to run the `gitrs-mcp` binary with `--repo /path/to/repo` as arguments. For example, VS Code reads `.vscode/mcp.json`:
+Add `.vscode/mcp.json` to the workspace (or run **MCP: Add Server** from the command palette). `${workspaceFolder}` serves the open folder:
 
 ```json
 {
@@ -100,6 +98,25 @@ Any client that can launch a stdio MCP server works. Configure it to run the `gi
   }
 }
 ```
+
+### Cursor
+
+Add `.cursor/mcp.json` to the project, or `~/.cursor/mcp.json` for every project:
+
+```json
+{
+  "mcpServers": {
+    "gitrs": {
+      "command": "gitrs-mcp",
+      "args": ["--repo", "${workspaceFolder}"]
+    }
+  }
+}
+```
+
+### Other MCP clients
+
+Any client that can launch a stdio MCP server works. Configure it to run `gitrs-mcp` with `--repo /path/to/repo` as arguments.
 
 ### Trying it by hand
 

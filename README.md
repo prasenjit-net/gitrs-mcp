@@ -150,6 +150,8 @@ make inspector  # explore the tools interactively in the MCP Inspector (needs np
 make check      # fmt-check + clippy + test + smoke: what CI should run
 make coverage   # coverage summary, fails below 80% lines (needs `cargo install cargo-llvm-cov`)
 make bench      # time tool calls against git on REPO (try a clone of git.git)
+make stress     # heaviest calls at their largest limits on REPO; checks output stays bounded
+make fuzz       # run the cargo-fuzz targets (needs nightly and cargo-fuzz)
 ```
 
 Every target accepts `REPO=<path>`, `ARGS="<extra server flags>"` and `LOG=<level>`. `make smoke` also takes `FILE=<tracked file>` (default `README.md`) for the tools that need a path.

@@ -858,4 +858,20 @@ mod tests {
             .is_err()
         );
     }
+
+    proptest::proptest! {
+        /// Parsing never panics, whatever the URI.
+        #[test]
+        fn any_uri_parses_or_errors(uri in "(gitrs://)?(commit|file|diff|x)?/?[a-z%0-9./?=&]{0,24}") {
+            let _ = Address::parse(&uri);
+        }
+
+        /// Revisions and paths survive being percent-encoded into a URI and parsed back.
+        #[test]
+        fn file_uris_round_trip(rev in "[a-z0-9_/~^.-]{1,12}", path in "[a-z0-9_. ü-]{1,8}(/[a-z0-9_.-]{1,8}){0,2}") {
+            use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
+            let uri = format!("gitrs://file/{}/{}", utf8_percent_encode(&rev, NON_ALPHANUMERIC), path);
+            proptest::prop_assert_eq!(Address::parse(&uri).unwrap(), Address::File { rev, path });
+        }
+    }
 }

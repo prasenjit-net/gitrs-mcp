@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
-"""Time gitrs-mcp tool calls against the equivalent git commands on one repository.
+"""Time gitrs-mcp tool calls against the equivalent git commands on one repository, or stress it.
 
 Usage: scripts/bench.py <gitrs-mcp binary> <repo> [runs]
+       scripts/bench.py --stress <gitrs-mcp binary> <repo>
 
 The server is started once; each case is called `runs` times (default 5) over stdio and timed from
 request to response, so the times include JSON encoding but not process start-up. The first call of
 a case shows a cold object cache, the best of the rest a warm one. Each git command runs `runs` times
 as a fresh process, as an agent shelling out to git would. Cases whose file or author doesn't exist in
 the repository are skipped, so it works on any repository, though git.git is the reference.
+
+With --stress, the heaviest calls run once each at their largest limits (deep history, whole-tree
+listings, big diffs, a resource of a long range). Each must succeed and return at most
+MAX_RESPONSE_BYTES, which shows the byte budgets and page limits hold on a large repository.
 """
 import json
 import subprocess
@@ -17,6 +22,35 @@ import time
 BLAME_FILE = "diff.c"
 HISTORY_FILE = "Makefile"
 AUTHOR = "Junio C Hamano"
+# Pages and byte budgets cap every response; this is far above any of them combined with JSON overhead.
+MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+
+STRESS = [
+    # name, method, params
+    ("log, 500 after skipping 80000", "tools/call",
+     {"name": "log", "arguments": {"limit": 500, "skip": 80000}}),
+    ("search_commits, every message, 500", "tools/call",
+     {"name": "search_commits", "arguments": {"message_regex": ".", "limit": 500}}),
+    (f"file_history {HISTORY_FILE} following renames, 500", "tools/call",
+     {"name": "file_history", "arguments": {"path": HISTORY_FILE, "follow_renames": True, "limit": 500}}),
+    (f"blame {HISTORY_FILE}, every hunk", "tools/call",
+     {"name": "blame", "arguments": {"path": HISTORY_FILE, "limit": 2000}}),
+    ("grep 'e', 1000 matches", "tools/call",
+     {"name": "grep", "arguments": {"pattern": "e", "limit": 1000}}),
+    ("diff v2.0.0..HEAD as patches, 1000 files, 1 MiB", "tools/call",
+     {"name": "diff", "arguments": {"from": "v2.0.0", "to": "HEAD", "format": "patch",
+                                    "limit": 1000, "max_bytes": 1048576}}),
+    ("compare_refs v2.0.0 HEAD", "tools/call",
+     {"name": "compare_refs", "arguments": {"base": "v2.0.0", "head": "HEAD"}}),
+    ("list_tree, recursive, 5000", "tools/call",
+     {"name": "list_tree", "arguments": {"recursive": True, "limit": 5000}}),
+    ("status", "tools/call", {"name": "status", "arguments": {"limit": 1000}}),
+    ("count_objects", "tools/call", {"name": "count_objects", "arguments": {}}),
+    ("merge_preview v2.0.0", "tools/call", {"name": "merge_preview", "arguments": {"theirs": "v2.0.0"}}),
+    ("resource gitrs://diff/v2.0.0..HEAD", "resources/read", {"uri": "gitrs://diff/v2.0.0..HEAD"}),
+    ("prompt explain_history Makefile, 100", "prompts/get",
+     {"name": "explain_history", "arguments": {"path": HISTORY_FILE, "limit": "100"}}),
+]
 
 CASES = [
     # name, tool, arguments, git command
@@ -58,13 +92,17 @@ class Server:
                 return message
 
     def call(self, tool, arguments):
+        return self.timed("tools/call", {"name": tool, "arguments": arguments})[0]
+
+    def timed(self, method, params):
+        """Send one request; return its time and the size of its JSON response."""
         started = time.perf_counter()
-        response = self.request("tools/call", {"name": tool, "arguments": arguments})
+        response = self.request(method, params)
         elapsed = time.perf_counter() - started
         result = response.get("result", {})
         if "error" in response or result.get("isError"):
             raise RuntimeError(json.dumps(response)[:300])
-        return elapsed
+        return elapsed, len(json.dumps(response))
 
     def close(self):
         self.proc.stdin.close()
@@ -94,7 +132,28 @@ def ms(seconds):
     return f"{seconds * 1000:,.0f} ms"
 
 
+def stress(binary, repo):
+    print(f"{repo}: stress, each call once at its largest limits\n")
+    print("| Case | time | response |")
+    print("|---|---:|---:|")
+    server = Server(binary, repo)
+    failed = False
+    try:
+        for name, method, params in STRESS:
+            elapsed, size = server.timed(method, params)
+            note = "" if size <= MAX_RESPONSE_BYTES else " (over the limit)"
+            failed |= size > MAX_RESPONSE_BYTES
+            print(f"| {name} | {ms(elapsed)} | {size / 1024:,.0f} KiB{note} |")
+            sys.stdout.flush()
+    finally:
+        server.close()
+    sys.exit(1 if failed else 0)
+
+
 def main():
+    if sys.argv[1] == "--stress":
+        stress(sys.argv[2], sys.argv[3])
+        return
     binary, repo = sys.argv[1], sys.argv[2]
     runs = int(sys.argv[3]) if len(sys.argv) > 3 else 5
     commits = subprocess.run(["git", "-C", repo, "rev-list", "--count", "HEAD"],

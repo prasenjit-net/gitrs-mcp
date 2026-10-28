@@ -403,4 +403,15 @@ mod tests {
             "gitrs://commit/HEAD?repo=a%26b"
         );
     }
+
+    proptest::proptest! {
+        /// Any repository name survives `?repo=` encoding and decoding.
+        #[test]
+        fn repo_queries_round_trip(name in "\\PC{1,16}") {
+            let uri = with_repo("gitrs://commit/HEAD", Some(&name));
+            let (base, repo) = split_repo(&uri).unwrap();
+            proptest::prop_assert_eq!(base, "gitrs://commit/HEAD");
+            proptest::prop_assert_eq!(repo, Some(name));
+        }
+    }
 }

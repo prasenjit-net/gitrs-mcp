@@ -285,7 +285,10 @@ fn compile_regex(field: &str, pattern: Option<&str>) -> anyhow::Result<Option<re
         .transpose()
 }
 
-fn parse_date(field: &str, input: Option<&str>) -> anyhow::Result<Option<SecondsSinceUnixEpoch>> {
+pub(crate) fn parse_date(
+    field: &str,
+    input: Option<&str>,
+) -> anyhow::Result<Option<SecondsSinceUnixEpoch>> {
     input
         .map(|s| {
             gix::date::parse(s, Some(gix::date::Zoned::now()))
@@ -851,5 +854,26 @@ mod tests {
         for result in cancelled {
             assert!(result.unwrap_err().to_string().contains("cancelled"));
         }
+    }
+
+    proptest::proptest! {
+        /// Dates are user text: parsing never panics.
+        #[test]
+        fn any_date_parses_or_errors(input in "\\PC{0,24}") {
+            let _ = parse_date("since", Some(&input));
+        }
+    }
+
+    /// Revisions are user text: resolving never panics, whatever the spec.
+    #[test]
+    fn any_revision_resolves_or_errors() {
+        let (_dir, repo) = fixture_repo();
+        let mut runner = proptest::test_runner::TestRunner::default();
+        runner
+            .run(&"[A-Za-z0-9@{}^~:./!-]{0,16}", |spec| {
+                let _ = crate::tools::resolve_object(&repo, Some(&spec));
+                Ok(())
+            })
+            .unwrap();
     }
 }

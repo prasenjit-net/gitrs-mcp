@@ -7,6 +7,7 @@ gitrs-mcp is a single binary that serves one Git repository to an MCP client ove
 ```
 src/
 ├─ main.rs          CLI arguments, logging to stderr, stdio transport
+├─ lib.rs           the library half: private modules, GitServer for main.rs, parsing entry points for fuzz/
 ├─ server/          MCP surface: server metadata (mod.rs) and one #[tool_router] per area
 │  ├─ repo.rs       repository, refs, tags, reflogs and revisions
 │  ├─ changes.rs    working tree, index, conflicts and merge previews

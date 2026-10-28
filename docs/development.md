@@ -43,6 +43,8 @@ Run `make` (or `make help`) for the full list.
 | `make inspector` | Open the [MCP Inspector](https://github.com/modelcontextprotocol/inspector) against the server, to try tools by hand. |
 | `make check` | `fmt-check`, `clippy`, `test` and `smoke`: everything CI should run. |
 | `make coverage` | Line coverage summary; fails below 80% (`COVERAGE_MIN`). |
+| `make stress` | Release build, then the heaviest calls at their largest limits on `REPO`, such as deep history, whole-tree listings and big diffs. Fails if any call errors or returns more than 4 MiB. |
+| `make fuzz` | Runs each cargo-fuzz target in `fuzz/` for `FUZZ_TIME` seconds (default 60). Needs `rustup toolchain install nightly` and `cargo install cargo-fuzz`. |
 | `make bench` | Release build, then times tool calls against the equivalent git commands on `REPO`, `RUNS` times each (default 5). Point it at a large repository such as git.git; see [Benchmarks](#benchmarks). |
 | `make coverage-html` | Line-by-line HTML coverage report, opened in the browser. |
 | `make install` / `make uninstall` | Install to or remove from `~/.cargo/bin`. |
@@ -119,6 +121,29 @@ Every tool has unit tests in its own file, in a `#[cfg(test)] mod tests` block. 
 ## Coverage
 
 `make coverage` fails below 80% line coverage. New code in `src/tools/` should be at or near full coverage, and coverage must not drop. `cargo llvm-cov` also instruments the binary the integration tests spawn, so `main.rs` and start-up are covered. Everything else in `server/` (write tools, resources, prompts, progress, subscriptions, several repositories and roots) is tested through the protocol with `server::tests::connect`, since a stdio smoke test can't safely change the served repository. Use `make coverage-html` to see which lines a change left untested.
+
+## Fuzzing and property tests
+
+Everything that parses text from a tool call is tested two ways:
+
+- **Property tests** run on stable as part of `make test`. They use [proptest](https://crates.io/crates/proptest), and live next to the code they cover:
+  - normalized paths never escape and normalize to themselves;
+  - every spelling of `.git` is refused, and nothing else is;
+  - resource URIs and `?repo=` names round-trip;
+  - dates and revisions never panic.
+- **Fuzz targets** live in `fuzz/` and run with libFuzzer through `make fuzz`. They need a nightly toolchain:
+  - `paths`, which also checks that an accepted path can't escape;
+  - `resource_uris`;
+  - `dates`;
+  - `revisions`, resolved in the repository named by `FUZZ_REPO`, by default this checkout.
+
+  The targets link against the library half of the crate (`src/lib.rs`) through its `#[doc(hidden)] fuzzing` module. Add an entry point there for any new parser. The `fuzz/` crate has its own workspace, so stable builds never see it.
+
+On the first runs, the property tests found that `./\x` normalized to the Windows-absolute `\x`. One minute per fuzz target, about 3.7 million inputs in all, found nothing more.
+
+## Stress tests
+
+`make stress REPO=<large repository>` sends the heaviest calls once each, at their largest limits. On git.git, every call succeeded within its bounds; the slowest were `blame` (1.1 s) and `compare_refs` across ten years of history (1.1 s). `make smoke REPO=<git.git> FILE=Makefile` also passes there. linux.git (about 5 GB) wasn't tried. The byte budgets and page limits are what bound output, and they don't depend on repository size.
 
 ## Benchmarks
 

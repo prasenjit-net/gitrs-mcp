@@ -341,7 +341,7 @@ pub fn root_relative(repo: &gix::Repository, path: &str) -> std::path::PathBuf {
 ///
 /// The repository root (`""` or `"."`) normalizes to an empty path.
 pub fn repo_path(path: &str) -> anyhow::Result<BString> {
-    if path.starts_with('/') || path.starts_with('\\') {
+    if path.starts_with('/') {
         bail!(
             "path `{path}` is absolute; pass a path relative to the repository root, e.g. `src/main.rs`"
         );
@@ -355,6 +355,12 @@ pub fn repo_path(path: &str) -> anyhow::Result<BString> {
             }
             part => parts.push(part),
         }
+    }
+    // Checked after normalizing, so `./\x` can't become the Windows-absolute `\x`.
+    if parts.first().is_some_and(|first| first.starts_with('\\')) {
+        bail!(
+            "path `{path}` is absolute; pass a path relative to the repository root, e.g. `src/main.rs`"
+        );
     }
     Ok(parts.join("/").into())
 }
@@ -737,6 +743,9 @@ mod tests {
         assert_eq!(repo_path(".").unwrap(), "");
         assert!(repo_path("/etc/passwd").is_err());
         assert!(repo_path("src/../../x").is_err());
+        for absolute in ["\\x", "./\\x", "//\\x"] {
+            assert!(repo_path(absolute).is_err(), "{absolute}");
+        }
         assert!(repo_file_path("./").is_err());
     }
 
@@ -829,5 +838,19 @@ mod tests {
             ChangeKind::of_modification(Blob, Link),
             ChangeKind::Typechange
         );
+    }
+
+    proptest::proptest! {
+        /// Whatever comes in, a normalized path can't escape the repository and normalizes to itself.
+        #[test]
+        fn normalized_paths_never_escape(input in "[a-z./\\\\ ]{0,24}") {
+            if let Ok(path) = repo_path(&input) {
+                let text = path.to_string();
+                proptest::prop_assert!(!text.starts_with('/'));
+                proptest::prop_assert!(text.split('/').all(|part| part != ".." && part != "."));
+                proptest::prop_assert!(text.is_empty() || text.split('/').all(|part| !part.is_empty()));
+                proptest::prop_assert_eq!(repo_path(&text).unwrap(), path);
+            }
+        }
     }
 }

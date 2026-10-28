@@ -1,0 +1,45 @@
+[package]
+name = "gitrs-mcp-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+gix = { version = "0.90", default-features = false, features = ["max-performance", "sha1", "revparse-regex"] }
+gitrs-mcp = { path = ".." }
+
+# Kept out of the main workspace: it builds only with nightly and cargo-fuzz.
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "paths"
+path = "fuzz_targets/paths.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "resource_uris"
+path = "fuzz_targets/resource_uris.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dates"
+path = "fuzz_targets/dates.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "revisions"
+path = "fuzz_targets/revisions.rs"
+test = false
+doc = false
+bench = false

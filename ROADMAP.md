@@ -14,7 +14,7 @@ _Last updated 2026-10-27._
 | 3 Safe writes | ✅ Done: 10 tools behind `--allow-write`, each checked against the git CLI |
 | 4 History rewriting | ✅ Done: 12 tools behind `--allow-write`, each checked against the git CLI, with git and gitrs-mcp able to continue each other's operations |
 | 5 MCP-native extras | ✅ Done: resources, prompts, completion, progress and cancellation, `--watch`, several repositories, caching and benchmarks |
-| 6 Hardening and release | 🚧 In progress: security review and integration tests done |
+| 6 Hardening and release | 🚧 In progress: security review, integration tests, fuzzing and stress tests done |
 
 The server has 28 read-only tools, plus 22 write tools registered only with `--allow-write`, along with resources, prompts and completion. 262 unit tests and the end-to-end smoke test pass, with 96.7% line coverage.
 
@@ -405,7 +405,7 @@ gix has no sequencer, so this phase is where we build our own logic on its primi
   - Paths: no `..` escapes, no following symlinks out of the worktree, and `core.worktree` overrides honoured safely.
   - Ownership checks: gix's `git_dir_trust`, the equivalent of git's `safe.directory`.
   - Redaction: config values with secrets are redacted.
-- **Fuzzing** of argument parsing and revspecs (`cargo fuzz`), plus large-repo stress tests (git.git, linux.git).
+- **Fuzzing** ✅ of argument parsing and revspecs (`cargo fuzz`), plus large-repo stress tests (git.git, linux.git).
 - **Integration tests** ✅ through a real MCP client (`rmcp` `client` + `transport-child-process` features) that spawns the binary.
 - **Distribution.**
   - `cargo install gitrs-mcp`, prebuilt binaries via `cargo-dist`, a Homebrew tap.
@@ -420,6 +420,11 @@ gix has no sequencer, so this phase is where we build our own logic on its primi
   - gix's checkout already refuses hostile trees that write into `.git` (CVE-2014-9390). A test now proves it for `switch`.
   - Repositories the current user doesn't own, and that aren't listed in `safe.directory`, get reduced trust from gix, which ignores their repository-local config. gitrs-mcp keeps reads working there but refuses every write tool, closer to git, which refuses such repositories altogether. `repo_info` gained a `trusted` field.
 - **Integration tests.** `tests/stdio.rs` spawns the binary with rmcp's `transport-child-process` and covers start-up, flags, several repositories and launching from a subdirectory. The in-process protocol tests from Phase 5 remain the place for detailed behaviour. They're faster and can inspect state.
+- **Fuzzing and stress tests.**
+  - Property tests (proptest, on stable, in `make test`) and cargo-fuzz targets (`make fuzz`, nightly) cover paths, resource URIs, dates and revisions.
+  - cargo-fuzz needs a library to link against, so the crate is now a library plus a thin binary. `src/lib.rs` keeps every module private and exports only what `main.rs` uses, plus a hidden `fuzzing` module.
+  - Found: `repo_path` checked for a leading `\` before removing `./`, so `./\x` became the Windows-absolute `\x`. It's now checked after normalizing.
+  - `make stress` runs the heaviest calls at their largest limits; every one stays bounded on git.git. linux.git wasn't tried, since output is bounded by the byte budgets and page limits, not by repository size.
 
 ---
 

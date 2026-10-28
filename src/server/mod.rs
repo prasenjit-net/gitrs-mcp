@@ -11,6 +11,8 @@ mod progress;
 mod prompts;
 mod repo;
 mod repos;
+
+pub(crate) use repos::split_repo;
 mod resources;
 mod setup;
 mod watch;

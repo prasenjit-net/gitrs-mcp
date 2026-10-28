@@ -229,7 +229,7 @@ pub fn worktree_path(workdir: &Path, path: &BStr) -> anyhow::Result<PathBuf> {
 /// Whether a path component names a `.git` directory as the filesystem may see it: case-insensitive
 /// filesystems (macOS, Windows) match any case, and NTFS ignores trailing dots and spaces. git
 /// refuses such components anywhere in a path for the same reason.
-fn is_git_dir_name(component: &[u8]) -> bool {
+pub(crate) fn is_git_dir_name(component: &[u8]) -> bool {
     let trimmed = component
         .iter()
         .rposition(|b| *b != b'.' && *b != b' ')
@@ -816,5 +816,23 @@ mod tests {
             list_tree(&repo, tree_args(Some("nope"), false)).unwrap_err()
         );
         assert!(err.contains("does not exist"), "{err}");
+    }
+
+    proptest::proptest! {
+        /// Every case and trailing-dot or -space spelling of `.git` is refused, and nothing else is.
+        #[test]
+        fn git_dir_spellings(upper in proptest::collection::vec(proptest::bool::ANY, 3), tail in "[. ]{0,3}") {
+            let name: String = ".git".chars().enumerate().map(|(i, c)| {
+                if i > 0 && upper[i - 1] { c.to_ascii_uppercase() } else { c }
+            }).collect();
+            let spelled = format!("{name}{tail}");
+            proptest::prop_assert!(is_git_dir_name(spelled.as_bytes()), "{}", spelled);
+        }
+
+        #[test]
+        fn other_names_pass(name in "[a-zA-Z0-9._ -]{0,8}") {
+            let trimmed = name.trim_end_matches(['.', ' ']);
+            proptest::prop_assert_eq!(is_git_dir_name(name.as_bytes()), trimmed.eq_ignore_ascii_case(".git"));
+        }
     }
 }

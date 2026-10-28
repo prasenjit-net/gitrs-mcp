@@ -3,20 +3,12 @@
 //! Speaks MCP over stdio. Never opens a network connection: gix is compiled
 //! without any transport features, so fetch/push/clone are impossible by construction.
 
-mod repo;
-mod server;
-mod tools;
-
 use std::path::PathBuf;
 
 use clap::Parser;
+use gitrs_mcp::{GitServer, Policy, RepoHandle};
 use rmcp::{ServiceExt, transport::stdio};
 use tracing_subscriber::EnvFilter;
-
-use crate::{
-    repo::RepoHandle,
-    server::{GitServer, Policy},
-};
 
 #[derive(Debug, Parser)]
 #[command(version, about = "Local-only Git MCP server (stdio)")]

@@ -13,10 +13,10 @@ _Last updated 2026-10-27._
 | 2 Deep read and inspection | ✅ Done: 14 tools, each checked against the git CLI |
 | 3 Safe writes | ✅ Done: 10 tools behind `--allow-write`, each checked against the git CLI |
 | 4 History rewriting | ✅ Done: 12 tools behind `--allow-write`, each checked against the git CLI, with git and gitrs-mcp able to continue each other's operations |
-| 5 MCP-native extras | 🚧 In progress: everything but caching is done |
+| 5 MCP-native extras | ✅ Done: resources, prompts, completion, progress and cancellation, `--watch`, several repositories, caching and benchmarks |
 | 6 Hardening and release | Planned |
 
-The server has 28 read-only tools, plus 22 write tools registered only with `--allow-write`. 220 unit tests and the end-to-end smoke test pass, with 96.2% line coverage.
+The server has 28 read-only tools, plus 22 write tools registered only with `--allow-write`, along with resources, prompts and completion. 262 unit tests and the end-to-end smoke test pass, with 96.7% line coverage.
 
 ## Design principles
 
@@ -342,7 +342,7 @@ gix has no sequencer, so this phase is where we build our own logic on its primi
 
 ---
 
-## Phase 5: MCP-native extras
+## Phase 5: MCP-native extras ✅
 
 - **Resources.** ✅
   - `gitrs://commit/{id}`, `gitrs://file/{rev}/{path}`, `gitrs://diff/{from}..{to}`, so clients can attach repo content as context.
@@ -356,7 +356,7 @@ gix has no sequencer, so this phase is where we build our own logic on its primi
 - **Multi-repo.** ✅
   - Accept multiple `--repo` values, or use MCP `roots` from the client.
   - Every tool gets an optional `repo` param. Refuse paths outside the declared roots.
-- **Caching.** Keep a per-process object cache (`object_cache_size_if_unset`) and reuse the commit-graph. Benchmark `log` and `blame` against git on git.git itself.
+- **Caching.** ✅ Keep a per-process object cache (`object_cache_size_if_unset`) and reuse the commit-graph. Benchmark `log` and `blame` against git on git.git itself.
 
 ### Phase 5: deviations from the plan
 
@@ -390,6 +390,11 @@ gix has no sequencer, so this phase is where we build our own logic on its primi
   - Added a `list_repos` tool, so the model can discover the names.
   - The server no longer makes the repository root its working directory, which can't work for several repositories. It moves to the filesystem root before opening any. From outside every working tree, gix resolves each repository's paths from its root.
   - Found while switching: `worktree_add`'s `path` and `worktree_remove`'s `worktree` resolved relative paths against the process directory instead of the repository root. Both now go through `tools::root_relative`.
+- **Caching and benchmarks.**
+  - Each blocking-pool thread keeps its thread-local `gix::Repository` per handle between calls, with a 16 MiB object cache (`object_cache_size_if_unset`). Before, every call started from a fresh instance. gix already uses the commit-graph on every walk, so there was nothing extra to keep.
+  - `make bench` (`scripts/bench.py`) times tool calls against the equivalent git commands. The results on git.git are in [docs/development.md](docs/development.md#benchmarks). The cache makes repeated calls about 10% faster.
+  - Found by the benchmark: `log` built a log entry, including a unique short id, for every *skipped* commit, so `skip: 20000` took 754 ms against git's 96 ms. `tools::paginate_built` only builds the returned page; it's now 84 ms. `file_history` and `search_commits` use it too.
+  - Remaining gaps: `file_history` is about 1.7 times git (our own walk, no changed-path Bloom filter), and `blame` about 1.5 times (gix's algorithm). Phase 6 can revisit them.
 - **Completion.** Prompt arguments complete too: `rev`, `from` and `to` complete from `HEAD` and ref short names, plus `index`/`worktree` where they're valid. `path` completes one directory level at a time against the context revision. Completion errors give no values, since a half-typed context revision is normal.
 
 ---

@@ -10,13 +10,13 @@ RELEASE_BIN := target/release/$(BIN)
 
 .DEFAULT_GOAL := help
 .PHONY: help build release run run-write test test-verbose fmt fmt-check clippy check \
-        coverage coverage-html smoke inspector install uninstall mcp-add doc deps outdated clean
+        coverage coverage-html smoke bench inspector install uninstall mcp-add doc deps outdated clean
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 	@echo
 	@echo "  Variables: REPO=<path> (default .)  ARGS=<extra server args>  LOG=<level> (default info)"
-	@echo "             FILE=<tracked file in REPO> for smoke (default README.md)"
+	@echo "             FILE=<tracked file in REPO> for smoke (default README.md)  RUNS=<n> for bench (default 5)"
 
 ## --- Build ---------------------------------------------------------------
 
@@ -36,6 +36,11 @@ run-write: build ## Run the server with --allow-write on REPO
 
 smoke: build ## End-to-end MCP round trip (initialize, tools/list, every tool) on REPO
 	scripts/smoke.sh $(DEBUG_BIN) $(REPO) $(FILE)
+
+RUNS ?= 5
+
+bench: release ## Time tool calls against git on REPO (use a big repo such as git.git), RUNS each
+	scripts/bench.py $(RELEASE_BIN) $(REPO) $(RUNS)
 
 inspector: build ## Open the MCP Inspector UI against the server (needs npx)
 	npx -y @modelcontextprotocol/inspector $(abspath $(DEBUG_BIN)) --repo $(abspath $(REPO)) $(ARGS)

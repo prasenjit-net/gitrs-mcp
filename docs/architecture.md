@@ -94,7 +94,9 @@ With `--watch`, `GitServer` owns a `server::watch::Watcher`, which holds the sub
 
 ## The sync/async bridge
 
-gix is synchronous and `gix::Repository` is not `Sync`, while rmcp handlers are async. `RepoHandle` holds a `gix::ThreadSafeRepository`, which is cheap to clone and can be shared between threads. For each call it clones the handle into a `spawn_blocking` task and turns it into a thread-local `Repository` there. Long Git operations therefore never block the async runtime, and concurrent calls each get their own repository instance with its own object caches.
+gix is synchronous and `gix::Repository` is not `Sync`, while rmcp handlers are async. `RepoHandle` holds a `gix::ThreadSafeRepository`, which is cheap to clone and can be shared between threads. For each call it clones the handle into a `spawn_blocking` task and uses a thread-local `Repository` there. Long Git operations therefore never block the async runtime, and concurrent calls each get their own repository instance.
+
+Each blocking-pool thread keeps its thread-local repositories between calls, one per handle, with a 16 MiB object cache (`object_cache_size_if_unset`), so repeated calls find objects already decoded. Objects are immutable, so the cache can't go stale. Refs, the index and packs are still read from disk, so changes made by git between calls are seen. A repository is taken out of the thread's map while a call uses it, so a panic only drops that instance. gix uses the commit-graph file, when the repository has one, on every revision walk.
 
 ## Repository discovery and paths
 

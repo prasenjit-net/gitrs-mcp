@@ -234,10 +234,26 @@ pub fn paginate<T>(
     skip: usize,
     limit: usize,
 ) -> anyhow::Result<(Vec<T>, bool)> {
-    let mut iter = items.into_iter().skip(skip);
+    paginate_built(items, skip, limit, Ok)
+}
+
+/// Like [`paginate`], building each item with `build` only once it's on the page. Skipped items are
+/// still checked for errors, but not built, which matters when building is the expensive part (a
+/// log entry's unique short id is an object-database lookup).
+pub fn paginate_built<T, U>(
+    items: impl IntoIterator<Item = anyhow::Result<T>>,
+    skip: usize,
+    limit: usize,
+    mut build: impl FnMut(T) -> anyhow::Result<U>,
+) -> anyhow::Result<(Vec<U>, bool)> {
+    let mut iter = items.into_iter();
+    for item in iter.by_ref().take(skip) {
+        item?;
+    }
     let page = iter
         .by_ref()
         .take(limit)
+        .map(|item| build(item?))
         .collect::<anyhow::Result<Vec<_>>>()?;
     let truncated = iter.next().transpose()?.is_some();
     Ok((page, truncated))
@@ -731,6 +747,24 @@ mod tests {
         assert_eq!(page_limit(Some(9999), 20, 500), 500);
         assert_eq!(byte_budget(None), DEFAULT_MAX_BYTES);
         assert_eq!(byte_budget(Some(usize::MAX)), MAX_MAX_BYTES);
+    }
+
+    #[test]
+    fn only_the_page_is_built() {
+        let mut built = Vec::new();
+        let (page, truncated) = paginate_built((0..10).map(anyhow::Ok), 6, 2, |n| {
+            built.push(n);
+            Ok(n * 10)
+        })
+        .unwrap();
+        assert_eq!((page, truncated), (vec![60, 70], true));
+        assert_eq!(built, [6, 7], "skipped and trailing items aren't built");
+
+        let failing = [Err(anyhow::anyhow!("broken")), Ok(1)];
+        assert!(
+            paginate_built(failing, 1, 1, Ok).is_err(),
+            "skipped errors still count"
+        );
     }
 
     #[test]

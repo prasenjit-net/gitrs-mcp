@@ -1,11 +1,28 @@
 //! Repository handles and the sync→async bridge for gix calls.
 
 use std::{
+    cell::RefCell,
+    collections::HashMap,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 use anyhow::Context;
+
+/// Object cache of each thread-local repository. Objects are immutable, so a warm cache never goes
+/// stale; it grows gradually up to this size.
+const OBJECT_CACHE_BYTES: usize = 16 * 1024 * 1024;
+
+static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+
+thread_local! {
+    /// The thread-local repositories of the threads that run tool calls, by handle id, kept between
+    /// calls so their object caches stay warm.
+    static OPEN: RefCell<HashMap<u64, gix::Repository>> = RefCell::new(HashMap::new());
+}
 
 /// A thread-safe handle to one served repository.
 ///
@@ -15,6 +32,8 @@ use anyhow::Context;
 pub struct RepoHandle {
     repo: gix::ThreadSafeRepository,
     root: Arc<PathBuf>,
+    /// Distinguishes handles in the thread-local cache; clones share it.
+    id: u64,
 }
 
 impl RepoHandle {
@@ -47,6 +66,7 @@ impl RepoHandle {
             repo: gix::ThreadSafeRepository::open(&root)
                 .with_context(|| format!("cannot open the repository at {}", root.display()))?,
             root: Arc::new(root),
+            id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
         })
     }
 
@@ -58,6 +78,7 @@ impl RepoHandle {
             repo: gix::ThreadSafeRepository::open_opts(path, gix::open::Options::isolated())
                 .expect("test repository opens"),
             root: Arc::new(std::fs::canonicalize(path).expect("test repository path resolves")),
+            id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
         }
     }
 
@@ -77,7 +98,7 @@ impl RepoHandle {
     /// Run `f` against the repository on the calling thread, for quick work in a synchronous
     /// callback that can't wait for the blocking pool.
     pub fn run_now<T>(&self, f: impl FnOnce(&gix::Repository) -> T) -> T {
-        f(&self.repo.to_thread_local())
+        with_local(&self.repo, self.id, f)
     }
 
     /// Run `f` against the repository on the blocking pool.
@@ -89,12 +110,30 @@ impl RepoHandle {
         F: FnOnce(&gix::Repository) -> anyhow::Result<T> + Send + 'static,
         T: Send + 'static,
     {
-        let repo = self.repo.clone();
-        tokio::task::spawn_blocking(move || f(&repo.to_thread_local()))
+        let (repo, id) = (self.repo.clone(), self.id);
+        tokio::task::spawn_blocking(move || with_local(&repo, id, f))
             .await
             .map_err(|e| format!("internal error: {e}"))?
             .map_err(|e| format!("{e:#}"))
     }
+}
+
+/// Run `f` on this thread's repository for handle `id`, opening it (with an object cache) the first
+/// time. It's out of the cache while `f` runs, so a nested call or a panic can't see it borrowed.
+fn with_local<T>(
+    shared: &gix::ThreadSafeRepository,
+    id: u64,
+    f: impl FnOnce(&gix::Repository) -> T,
+) -> T {
+    let cached = OPEN.with(|open| open.borrow_mut().remove(&id));
+    let repo = cached.unwrap_or_else(|| {
+        let mut repo = shared.to_thread_local();
+        repo.object_cache_size_if_unset(OBJECT_CACHE_BYTES);
+        repo
+    });
+    let out = f(&repo);
+    OPEN.with(|open| open.borrow_mut().insert(id, repo));
+    out
 }
 
 #[cfg(test)]

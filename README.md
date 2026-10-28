@@ -12,7 +12,7 @@ It lets AI assistants inspect a Git repository through typed tools with structur
 - **Context to attach.** Commits, files and diffs are also served as `gitrs://` resources (for example the staged changes), with completion of revisions and paths. Prompts such as `write_commit_message` and `review_changes` come filled in with the diff they need.
 - **Pure Rust.** It runs as a single static binary that speaks MCP over stdio, and it doesn't need `libgit2` or the `git` executable.
 
-> **Status:** early development. Phases 0–4 of the [roadmap](ROADMAP.md) are done: 28 read-only tools covering status, diffs, merge previews and conflicts, file contents, code search, ignore and attribute rules, history, blame, refs, tags, reflogs, stashes, notes, worktrees, submodules, config and object stats; and, with `--allow-write`, 22 write tools for the local edit, stage, commit and branch loop, plus merges, cherry-picks, reverts, rebases, stashes, hard resets, `clean` and worktrees. Merges and rebases that stop on conflicts leave git's own state, so you can finish them with either gitrs-mcp or git.
+> **Status:** early development. Phases 0–5 of the [roadmap](ROADMAP.md) are done: 28 read-only tools covering status, diffs, merge previews and conflicts, file contents, code search, ignore and attribute rules, history, blame, refs, tags, reflogs, stashes, notes, worktrees, submodules, config and object stats; and, with `--allow-write`, 22 write tools for the local edit, stage, commit and branch loop, plus merges, cherry-picks, reverts, rebases, stashes, hard resets, `clean` and worktrees. Merges and rebases that stop on conflicts leave git's own state, so you can finish them with either gitrs-mcp or git. On top of the tools come `gitrs://` resources, prompts, completion, progress and cancellation, change notifications (`--watch`), and several repositories per server.
 
 ## Install
 
@@ -148,6 +148,7 @@ make smoke      # end-to-end MCP round trip over stdio, calling every tool again
 make inspector  # explore the tools interactively in the MCP Inspector (needs npx)
 make check      # fmt-check + clippy + test + smoke: what CI should run
 make coverage   # coverage summary, fails below 80% lines (needs `cargo install cargo-llvm-cov`)
+make bench      # time tool calls against git on REPO (try a clone of git.git)
 ```
 
 Every target accepts `REPO=<path>`, `ARGS="<extra server flags>"` and `LOG=<level>`. `make smoke` also takes `FILE=<tracked file>` (default `README.md`) for the tools that need a path.

@@ -43,11 +43,12 @@ Run `make` (or `make help`) for the full list.
 | `make inspector` | Open the [MCP Inspector](https://github.com/modelcontextprotocol/inspector) against the server, to try tools by hand. |
 | `make check` | `fmt-check`, `clippy`, `test` and `smoke`: everything CI should run. |
 | `make coverage` | Line coverage summary; fails below 80% (`COVERAGE_MIN`). |
+| `make bench` | Release build, then times tool calls against the equivalent git commands on `REPO`, `RUNS` times each (default 5). Point it at a large repository such as git.git; see [Benchmarks](#benchmarks). |
 | `make coverage-html` | Line-by-line HTML coverage report, opened in the browser. |
 | `make install` / `make uninstall` | Install to or remove from `~/.cargo/bin`. |
 | `make mcp-add` | Build a release binary and register it with Claude Code for `REPO`. |
 
-Variables: `REPO=<path>` (default `.`), `ARGS="<extra server flags>"`, `LOG=<level>` (default `info`), and `FILE=<tracked file>` for `make smoke` (default `README.md`). For example, `make smoke REPO=../other-project FILE=src/main.rs`.
+Variables: `REPO=<path>` (default `.`), `ARGS="<extra server flags>"`, `LOG=<level>` (default `info`), `FILE=<tracked file>` for `make smoke` (default `README.md`), and `RUNS=<n>` for `make bench` (default 5). For example, `make smoke REPO=../other-project FILE=src/main.rs`.
 
 ## Adding a tool
 
@@ -115,7 +116,27 @@ Every tool has unit tests in its own file, in a `#[cfg(test)] mod tests` block. 
 
 ## Coverage
 
-`make coverage` fails below 80% line coverage. New code in `src/tools/` should be at or near full coverage, and coverage must not drop. `main.rs`, `repo.rs` and the read-tool wrappers in `server/` are exercised by `make smoke`, not by unit tests, so they show as uncovered there. The `--allow-write` gating and the write-tool wrappers have unit tests in `server/` (using `RepoHandle::open_isolated`, which doesn't change the process directory), because a stdio smoke test can't safely change the served repository. Use `make coverage-html` to see which lines a change left untested.
+`make coverage` fails below 80% line coverage. New code in `src/tools/` should be at or near full coverage, and coverage must not drop. `main.rs`, `RepoHandle::leave_worktrees` and most read-tool wrappers in `server/` are exercised by `make smoke`, not by unit tests, so they show as uncovered there. Everything else in `server/` (write tools, resources, prompts, progress, subscriptions, several repositories and roots) is tested through the protocol with `server::tests::connect`, since a stdio smoke test can't safely change the served repository. Use `make coverage-html` to see which lines a change left untested.
+
+## Benchmarks
+
+`make bench REPO=<path>` (`scripts/bench.py`) starts the release server once and times tool calls from request to response, then the equivalent git commands as fresh processes. The first call of each case runs with cold caches, and the best of the rest with warm ones. Cases that need a file or author missing from the repository are skipped.
+
+On a clone of git.git (82,605 commits, git 2.50.1, Apple M-series laptop, 5 runs each):
+
+| Case | gitrs-mcp first call | gitrs-mcp best | git best |
+|---|---:|---:|---:|
+| log, 500 commits | 40 ms | 18 ms | 11 ms |
+| log, 20 after skipping 20000 | 84 ms | 84 ms | 96 ms |
+| search_commits by author, 50 | 3 ms | 2 ms | 8 ms |
+| file_history Makefile, 100 | 57 ms | 39 ms | 23 ms |
+| blame diff.c | 1,266 ms | 1,090 ms | 739 ms |
+| grep 'static int', 100 matches | 88 ms | 27 ms | 94 ms |
+
+- **`log`, `search_commits` and `grep`** are on a par with git or faster. git pays for starting a process on every call, and the server is already running.
+- **`file_history`** is about 1.7 times git. It's our own walk, implementing git's history simplification, without a changed-path Bloom filter.
+- **`blame`** is about 1.5 times git. That time is gix's blame algorithm.
+- **First calls** are slower mostly because the operating system's file cache is cold. The per-thread object cache (see [architecture](architecture.md#the-syncasync-bridge)) makes repeated calls about 10% faster than without it: 22 to 18 ms for `log`, and 1,193 to 1,090 ms for `blame`.
 
 ## Before committing
 

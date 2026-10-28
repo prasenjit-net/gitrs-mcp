@@ -15,7 +15,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    ChangeKind, LogEntry, Signature, page_limit, paginate, progress::Watch, repo_file_path,
+    ChangeKind, LogEntry, Signature, page_limit, paginate_built, progress::Watch, repo_file_path,
     repo_path, resolve_commit,
 };
 
@@ -54,10 +54,10 @@ pub fn log(repo: &gix::Repository, args: LogArgs, watch: &Watch) -> anyhow::Resu
         walk = walk.first_parent_only();
     }
     let walked = walk.all()?.map(|info| Ok(info?));
-    let entries = watch
-        .track(walked, None, "commits walked")
-        .map(|info| LogEntry::from_commit(&info?.object()?));
-    let (commits, truncated) = paginate(entries, args.skip.unwrap_or(0), limit)?;
+    let walked = watch.track(walked, None, "commits walked");
+    let (commits, truncated) = paginate_built(walked, args.skip.unwrap_or(0), limit, |info| {
+        LogEntry::from_commit(&info.object()?)
+    })?;
     Ok(LogResult { commits, truncated })
 }
 
@@ -151,16 +151,15 @@ pub fn file_history(
     }
     let limit = page_limit(args.limit, DEFAULT_LOG_LIMIT, MAX_LOG_LIMIT);
     let walk = PathHistory::new(repo, &tip, path, args.follow_renames, None)?;
-    let entries = watch.track(walk, None, "commits found").map(|step| {
-        let step = step?;
+    let steps = watch.track(walk, None, "commits found");
+    let (commits, truncated) = paginate_built(steps, args.skip.unwrap_or(0), limit, |step| {
         Ok(FileHistoryEntry {
             commit: LogEntry::from_commit(&step.commit)?,
             change: step.change,
             path: step.path.to_string(),
             old_path: step.old_path.map(|p| p.to_string()),
         })
-    });
-    let (commits, truncated) = paginate(entries, args.skip.unwrap_or(0), limit)?;
+    })?;
     Ok(FileHistoryResult { commits, truncated })
 }
 
@@ -225,18 +224,16 @@ pub fn search_commits(
         }
     };
     let scanned = watch.track(candidates, None, "commits scanned");
-    let entries = scanned.filter_map(|commit| {
-        let step = || -> anyhow::Result<Option<LogEntry>> {
+    let matching = scanned.filter_map(|commit| {
+        let step = || -> anyhow::Result<Option<gix::Commit<'_>>> {
             let commit = commit?;
-            Ok(if filter.matches(&commit)? {
-                Some(LogEntry::from_commit(&commit)?)
-            } else {
-                None
-            })
+            Ok(filter.matches(&commit)?.then_some(commit))
         };
         step().transpose()
     });
-    let (commits, truncated) = paginate(entries, args.skip.unwrap_or(0), limit)?;
+    let (commits, truncated) = paginate_built(matching, args.skip.unwrap_or(0), limit, |commit| {
+        LogEntry::from_commit(&commit)
+    })?;
     Ok(SearchCommitsResult { commits, truncated })
 }
 

@@ -58,7 +58,7 @@ The examples come from a small demo repository, which [`scripts/demo-repo.sh`](.
 
 ## `list_repos`
 
-The repositories this server serves: those it was started with (`--repo`, which can be repeated) and any at the client's MCP roots. Pass a `name` as `repo` to any tool or prompt, or as `?repo=<name>` on a [resource](resources.md), to use that repository.
+The repositories this server serves: those it was started with (`--repo`, which can be repeated) and any at the client's MCP roots. If the server started outside a repository and the client has sent no roots, the list is empty. Pass a `name` as `repo` to any tool or prompt, or as `?repo=<name>` on a [resource](resources.md), to use that repository.
 
 **Arguments:** none.
 

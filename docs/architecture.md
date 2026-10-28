@@ -7,6 +7,7 @@ gitrs-mcp is a single binary that serves one Git repository to an MCP client ove
 ```
 src/
 ├─ main.rs          CLI arguments, logging to stderr, stdio transport
+├─ setup/           `gitrs-mcp setup`: registering the server with agents (below)
 ├─ lib.rs           the library half: private modules, GitServer for main.rs, parsing entry points for fuzz/
 ├─ server/          MCP surface: server metadata (mod.rs) and one #[tool_router] per area
 │  ├─ repo.rs       repository, refs, tags, reflogs and revisions
@@ -64,6 +65,29 @@ Each layer has one job, and dependencies only point downward:
 | `tools/` | All Git behaviour, plus the argument and result types that become JSON Schemas | Import `rmcp` or `server` |
 
 Because `tools/` doesn't depend on MCP at all, every tool is an ordinary function, `fn(&gix::Repository, Args) -> anyhow::Result<Out>`, and its unit tests call it directly.
+
+## The setup layer
+
+`src/setup/` is separate from everything above: it imports neither `rmcp` nor `tools` nor `server`, and never opens a repository. It is a small pipeline:
+
+```
+SetupArgs ─► pick agents ─► plan (read only) ─► show ─► confirm ─► apply
+```
+
+| File | Role |
+|---|---|
+| `mod.rs` | The arguments, the pipeline above, the report. No agent specifics. |
+| `agents.rs` | The registry: one `Agent` per client with how to detect it, its config files per scope, its format, and when the format was last verified. |
+| `plan.rs` | Works out what would happen for one agent and scope (`Verdict`) and what applying it changes (`Effect`). Reads files and, for Claude Code, runs `claude mcp get`; writes nothing. |
+| `document.rs` | The `Document` trait: get, set, remove one entry in a parsed config file. |
+| `json.rs`, `toml.rs` | `Document` for JSON (`serde_json` with ordered keys) and TOML (`toml_edit`, which keeps comments). |
+| `files.rs` | Reading, backing up and atomically replacing a file. |
+| `cli.rs` | Running `claude` with a fixed argument list and a timeout. |
+| `binary.rs` | Which command to register (absolute path or bare name, and the Homebrew rule). |
+| `env.rs` | Everything read from the machine (home, `PATH`, working directory, this executable), so tests can use a temporary one. |
+| `prompt.rs` | The checklist and yes/no questions, over injected input and output. |
+
+Planning and applying are separate so `--dry-run`, `--status` and the confirmation can show the plan without side effects. Because the file formats share the `Document` trait, the add, replace, remove and compare rules are written once.
 
 ## Data flow of a tool call
 

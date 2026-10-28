@@ -64,6 +64,20 @@ Configuration that gix derives from environment variables isn't listed at all. T
 - **Long calls.** Long walks report progress and stop when the client cancels. `blame` is the exception, since gix's blame can't be interrupted.
 - **Regexes.** They use Rust's `regex` crate, which runs in linear time, so a hostile pattern can't cause catastrophic backtracking.
 
+## What `setup` changes
+
+`gitrs-mcp setup` is the one part of the program that writes outside a repository: it edits the configuration files of AI agents. It is held to the same discipline as the write tools.
+
+- **Only what you name.** It touches the files of the agents you chose (or `--all` found), and only the one entry called `gitrs` (or `--name`). Other servers, other settings, key order and, in TOML, comments stay.
+- **Never overwrites what it can't read.** A file that isn't valid JSON or TOML, including VS Code's `mcp.json` when it has comments, is left alone with a message.
+- **Backups and atomic writes.** Before the first change to a file it copies the file to `<file>.gitrs-backup-<unix time>`; the new contents go to a temporary file in the same directory and are renamed over the old one, with the old file's permissions. A crash leaves the old file or the new one, never half of one.
+- **Different entries are not replaced** without `--force`.
+- **Dry runs and refusals change nothing.** Tests compare every file on a fake machine before and after.
+- **Write tools stay off** unless you pass `--allow-write` or answer "yes" at a prompt that defaults to "no".
+- **Nothing sensitive is stored.** An entry is a command and its arguments. No tokens, no environment values.
+- **Subprocesses.** Only Claude Code's own `claude` CLI is run, with a fixed list of arguments, never through a shell, with a 30-second timeout. Setup makes no network connections.
+- **Project scope** writes files you commit. Those entries use the bare command `gitrs-mcp`, so they carry no local paths. Claude Code asks you to approve a project server before using it, and Codex only reads a project's `.codex/config.toml` once you trust the project.
+
 ## Known limits
 
 - **Races.** A path is checked, then read or written. Another process changing the working tree between the two steps (time of check to time of use) could defeat the symlink checks. gitrs-mcp assumes nothing else is maliciously rewriting your working tree while it runs.

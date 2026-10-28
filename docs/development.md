@@ -100,6 +100,15 @@ A tool is one function and one wrapper. Using a made-up `describe` tool as the e
 
 7. **Record the API.** Run `make api` to add the tool to `api/schema.json`. The API test fails until you do, so the new schema shows up in review. Renaming or removing anything is a breaking change; see [versioning](versioning.md).
 
+## Adding an agent to `setup`
+
+`gitrs-mcp setup` knows agents from the registry in `src/setup/agents.rs`.
+
+1. Check the agent's current documentation for where its MCP configuration lives on each OS, the key the servers sit under, and the entry's fields. Formats drift; note the date.
+2. Add a `Client` variant and an `Agent` entry: `detect`, `user_file`, `project_file` (relative to the project), `format` (`Json { servers_key, typed }` or `Toml`) and the `after_change` text. If the agent has its own CLI and no stable file, add a `Format` variant and handle it in `plan.rs` as `plan_claude` does; prefer the file route when the format is documented, because it can be tested without the CLI.
+3. Add tests in `setup/mod.rs`: a new file, other servers kept, the second run unchanged, `--remove`, a file that doesn't parse. The `Machine` helper builds a temporary home, project and `PATH`.
+4. Add the agent to the table in [configuration.md](configuration.md) and, before a release, run the manual check on the real application: register, restart, call a tool, remove.
+
 ## Testing
 
 Every tool has unit tests in its own file, in a `#[cfg(test)] mod tests` block. Shared fixtures live in `tools::testutil`; add to it rather than creating a second fixture builder.

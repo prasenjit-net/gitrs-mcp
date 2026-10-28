@@ -39,12 +39,21 @@ My recommendation is in bold. Say if you disagree with any; the phases below ass
 
 ### 7.0 Start without a repository
 
-- [ ] With no `--repo` given and the working directory outside any repository, start with no repository instead of exiting. Roots from the client add repositories as they do now. An explicit `--repo` that isn't a repository is still a startup error, since that is a mistake worth reporting.
-- [ ] Tools called with nothing served return an actionable error: open a folder in the client, or add `--repo <path>` to the registration. `list_repos` returns an empty list.
+- [x] With no `--repo` given and the working directory outside any repository, start with no repository instead of exiting. Roots from the client add repositories as they do now. An explicit `--repo` that isn't a repository is still a startup error, since that is a mistake worth reporting.
+- [x] Tools called with nothing served return an actionable error: open a folder in the client, or add `--repo <path>` to the registration. `list_repos` returns an empty list.
 - [ ] Find out which of the five clients send roots (a one-time manual check) and record the result in docs/configuration.md. Clients that don't send roots need `--repo` in their registration, and setup must say so.
-- Tests: integration tests in `tests/stdio.rs` that launch from a non-repository directory with and without roots. Compatible change; note it in the CHANGELOG.
+- Tests (done): integration tests in `tests/stdio.rs` that launch from a non-repository directory with and without roots. Compatible change; note it in the CHANGELOG.
 
 ### 7.1 Command surface
+
+**Status: built.** Deviations from the design below, all deliberate:
+
+- **Codex and VS Code are edited as files, not through their CLIs.** `codex mcp add` and `code --add-mcp` can't say whether an identical entry exists, have no dry run, and (for VS Code) have no documented removal. Editing `config.toml` (with `toml_edit`, keeping comments) and VS Code's user `mcp.json` can be compared, previewed, backed up and removed. Only Claude Code, whose file (`~/.claude.json`) is not meant to be edited by others, goes through its CLI, and for it an existing entry is reported as "exists" rather than compared (`--force` replaces it).
+- **No automatic `${workspaceFolder}`.** Project-scope entries have no `--repo` unless you pass one; Cursor and VS Code start project servers in the project folder.
+- **`--remove` and `--status` without `--scope`** look at both scopes; installing defaults to user.
+- **Claude Desktop** has no `--repo` prompt: setup prints the advice and relies on `--repo`.
+- **JSON files are rewritten with two-space indentation** (key order and other entries are kept). Files with comments are refused.
+- **Extra files** in `src/setup/`: `env.rs`, `files.rs`, `cli.rs`, `document.rs`, `plan.rs`.
 
 ```
 gitrs-mcp setup [--client <id>]... [--all] [--scope user|project]
@@ -130,11 +139,11 @@ Every filesystem location comes from an injectable environment (home, `APPDATA`,
 
 ### 7.7 Documentation
 
-- [ ] README: a quick start with the two commands.
-- [ ] docs/configuration.md: the `setup` reference, which clients send roots, and the manual snippets kept as a fallback for every agent.
-- [ ] docs/security.md: which files setup touches, backups, and that write tools stay off unless asked for.
-- [ ] docs/architecture.md: the setup layer. docs/development.md: how to add an agent.
-- [ ] CHANGELOG. Examples in the docs must be real output, taken from a run against a temporary home.
+- [x] README: a quick start with the two commands.
+- [x] docs/configuration.md: the `setup` reference (the roots check is still open, see 7.0), and the manual snippets kept as a fallback for every agent.
+- [x] docs/security.md: which files setup touches, backups, and that write tools stay off unless asked for.
+- [x] docs/architecture.md: the setup layer. docs/development.md: how to add an agent.
+- [x] CHANGELOG. Examples in the docs must be real output, taken from a run against a temporary home.
 
 ## Phase 8: Distribution
 

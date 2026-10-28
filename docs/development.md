@@ -40,8 +40,10 @@ Run `make` (or `make help`) for the full list.
 | `make fmt` / `make fmt-check` | Format, or check formatting. |
 | `make clippy` | Lint with warnings as errors. |
 | `make smoke` | End-to-end MCP round trip over stdio: initialize, `tools/list`, then one call to every read tool against `REPO`; then a second session with `--allow-write` that checks the write tools are listed only there and calls some of them in ways that can't change anything. Fails if any call has an unexpected outcome or gets no answer. |
+| `make test-install` | Run `install.sh` against a fixture release served from a local directory (`file://`): install, checksum mismatch, unsupported CPU, `--dry-run`, reinstall, uninstall. No network. |
+| `make shellcheck` | ShellCheck on `install.sh` and `scripts/*.sh` (needs `shellcheck`). CI runs it. |
 | `make inspector` | Open the [MCP Inspector](https://github.com/modelcontextprotocol/inspector) against the server, to try tools by hand. |
-| `make check` | `fmt-check`, `clippy`, `test` and `smoke`: everything CI should run. |
+| `make check` | `fmt-check`, `clippy`, `test`, `smoke` and `test-install`: everything CI should run. |
 | `make coverage` | Line coverage summary; fails below 80% (`COVERAGE_MIN`). |
 | `make stress` | Release build, then the heaviest calls at their largest limits on `REPO`, such as deep history, whole-tree listings and big diffs. Fails if any call errors or returns more than 4 MiB. |
 | `make fuzz` | Runs each cargo-fuzz target in `fuzz/` for `FUZZ_TIME` seconds (default 60). Needs `rustup toolchain install nightly` and `cargo install cargo-fuzz`. |
@@ -96,9 +98,18 @@ A tool is one function and one wrapper. Using a made-up `describe` tool as the e
 
 5. **Test it** in the same file (see below), and add a call to `scripts/smoke.sh`. If the call needs something the served repository may not have (a tag, a merge in progress), ask for something that can't exist and add the request id to `expect_error`: the smoke test then requires that call to return a tool error.
 
-6. **Document it** in the same change: a section in [tools.md](tools.md) with an example taken from real output (build the demo workspace with `scripts/demo-repo.sh <new dir>` and call the tool on the repository it creates, for example with `make inspector REPO=<dir>/demo`), a row in the README's tool table, and the tool marked done in [ROADMAP.md](../ROADMAP.md).
+6. **Document it** in the same change: a section in [tools.md](tools.md) with an example taken from real output (build the demo workspace with `scripts/demo-repo.sh <new dir>` and call the tool on the repository it creates, for example with `make inspector REPO=<dir>/demo`), a row in the README's tool table, and the work item marked done in [PLAN.md](../PLAN.md).
 
 7. **Record the API.** Run `make api` to add the tool to `api/schema.json`. The API test fails until you do, so the new schema shows up in review. Renaming or removing anything is a breaking change; see [versioning](versioning.md).
+
+## Adding an agent to `setup`
+
+`gitrs-mcp setup` knows agents from the registry in `src/setup/agents.rs`.
+
+1. Check the agent's current documentation for where its MCP configuration lives on each OS, the key the servers sit under, and the entry's fields. Formats drift; note the date.
+2. Add a `Client` variant and an `Agent` entry: `detect`, `user_file`, `project_file` (relative to the project), `format` (`Json { servers_key, typed }` or `Toml`) and the `after_change` text. If the agent has its own CLI and no stable file, add a `Format` variant and handle it in `plan.rs` as `plan_claude` does; prefer the file route when the format is documented, because it can be tested without the CLI.
+3. Add tests in `setup/mod.rs`: a new file, other servers kept, the second run unchanged, `--remove`, a file that doesn't parse. The `Machine` helper builds a temporary home, project and `PATH`.
+4. Add the agent to the table in [configuration.md](configuration.md) and, before a release, run the manual check on the real application: register, restart, call a tool, remove.
 
 ## Testing
 
@@ -188,6 +199,8 @@ For each release:
 3. Make sure `api/schema.json` is current (`make api`), and that `make check` and `dist plan` pass.
 4. Commit, then tag and push: `git tag v0.1.0 && git push origin v0.1.0`. The release workflow builds the binaries for macOS (Apple Silicon and Intel), Linux (x86_64 and arm64) and Windows. It then creates the GitHub release with the shell and PowerShell installers, and pushes the Homebrew formula.
 5. Publish the crate: `cargo publish`.
+
+`install.sh` at the repository root installs from the release assets, which are named by cargo-dist: `gitrs-mcp-<target>.tar.gz` (`unix-archive` in `dist-workspace.toml` makes them gzip rather than xz, so minimal systems can unpack them), a `.sha256` file beside each, and `gitrs-mcp-installer.{sh,ps1}`. If an asset name changes, change `install.sh` and `scripts/test-install.sh` with it. After a release, the *Post-release check* workflow runs the real `curl | sh` on Ubuntu and macOS.
 
 ## Before committing
 

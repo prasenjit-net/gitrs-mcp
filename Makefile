@@ -10,7 +10,7 @@ RELEASE_BIN := target/release/$(BIN)
 
 .DEFAULT_GOAL := help
 .PHONY: help build release run run-write test test-verbose fmt fmt-check clippy check \
-        coverage coverage-html smoke api bench stress fuzz inspector install uninstall mcp-add doc deps outdated clean
+        coverage coverage-html smoke test-install shellcheck api bench stress fuzz inspector install uninstall mcp-add doc deps outdated clean
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -78,7 +78,13 @@ fmt-check: ## Check formatting without changing files
 clippy: ## Lint with warnings as errors
 	cargo clippy --all-targets -- -D warnings
 
-check: fmt-check clippy test smoke ## Everything CI should run
+test-install: build ## Test install.sh against a local fixture release (no network)
+	scripts/test-install.sh $(DEBUG_BIN)
+
+shellcheck: ## Lint install.sh and the shell scripts (needs shellcheck)
+	shellcheck install.sh scripts/*.sh
+
+check: fmt-check clippy test smoke test-install ## Everything CI should run
 
 COVERAGE_MIN ?= 80
 

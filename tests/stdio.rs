@@ -67,8 +67,8 @@ fn call(name: &str, arguments: serde_json::Value) -> CallToolRequestParams {
         .with_arguments(arguments.as_object().cloned().unwrap_or_default())
 }
 
-async fn structured(
-    client: &RunningService<RoleClient, ()>,
+async fn structured<H: rmcp::ClientHandler>(
+    client: &RunningService<RoleClient, H>,
     name: &str,
     arguments: serde_json::Value,
 ) -> serde_json::Value {
@@ -197,4 +197,91 @@ async fn not_a_repository_fails_to_start() {
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("no git repository found"), "{stderr}");
+}
+
+/// A client whose single MCP root is `.0`.
+struct RootsClient(String);
+
+// Roots are deprecated by protocol 2026-07-28; this client declares them like today's clients.
+#[allow(deprecated)]
+impl rmcp::ClientHandler for RootsClient {
+    async fn list_roots(
+        &self,
+        _context: rmcp::service::RequestContext<RoleClient>,
+    ) -> Result<rmcp::model::ListRootsResult, rmcp::ErrorData> {
+        Ok(rmcp::model::ListRootsResult::new(vec![
+            rmcp::model::Root::new(&self.0),
+        ]))
+    }
+
+    fn get_info(&self) -> rmcp::model::ClientConfig {
+        rmcp::model::ClientConfig::new(
+            rmcp::model::ClientCapabilities::builder()
+                .enable_roots()
+                .build(),
+            rmcp::model::Implementation::new("roots-client", "0"),
+        )
+    }
+}
+
+/// The server's command, launched in `cwd` (outside every repository, which `cwd`'s parent seals).
+fn command_outside_repositories(cwd: &Path) -> tokio::process::Command {
+    let mut command = tokio::process::Command::new(BIN);
+    command
+        .current_dir(cwd)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CEILING_DIRECTORIES", cwd.parent().unwrap())
+        .env("GITRS_LOG", "off");
+    command
+}
+
+#[tokio::test]
+async fn without_a_repository_the_server_starts_and_says_what_to_do() {
+    let empty = tempfile::tempdir().unwrap();
+    let transport = TokioChildProcess::new(command_outside_repositories(empty.path())).unwrap();
+    let client = ().serve(transport).await.expect("starts with no repository");
+
+    let repos = structured(&client, "list_repos", serde_json::json!({})).await;
+    assert_eq!(repos["repos"].as_array().unwrap().len(), 0);
+    let refused = client
+        .call_tool(call("status", serde_json::json!({})))
+        .await
+        .unwrap();
+    assert_eq!(refused.is_error, Some(true));
+    let message = serde_json::to_string(&refused.content).unwrap();
+    assert!(message.contains("--repo <path>"), "{message}");
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test]
+async fn without_a_repository_the_clients_roots_are_served() {
+    let repo = fixture();
+    let launched_in = tempfile::tempdir().unwrap();
+    let transport =
+        TokioChildProcess::new(command_outside_repositories(launched_in.path())).unwrap();
+    let root = format!("file://{}", repo.path().canonicalize().unwrap().display());
+    let client = RootsClient(root)
+        .serve(transport)
+        .await
+        .expect("starts with no repository");
+
+    // The server asks for the roots once the handshake is done.
+    for _ in 0..200 {
+        let repos = client
+            .call_tool(call("list_repos", serde_json::json!({})))
+            .await
+            .unwrap();
+        if repos.structured_content.unwrap()["repos"]
+            .as_array()
+            .is_some_and(|r| !r.is_empty())
+        {
+            let log = structured(&client, "log", serde_json::json!({"limit": 1})).await;
+            assert_eq!(log["commits"][0]["summary"], "second");
+            client.cancel().await.unwrap();
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    panic!("the root was never served");
 }

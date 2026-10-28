@@ -43,6 +43,8 @@ git checkout -q -b polish v0.1.0
 printf 'pub fn farewell(name: &str) -> String {\n    format!("See you, {name}!")\n}\n' > src/farewell.rs
 git add . && at 1791050000 && git commit -q -m "Add a friendlier farewell"
 git checkout -q main
+# The single quotes are deliberate: the backticks and $ belong to the README text being written.
+# shellcheck disable=SC2016
 printf '\n## Usage\n\n```rust\nlet hi = greet::greet("Ada");\n```\n' >> README.md
 git add . && at 1791101700 && git commit -q -m "Document usage" -m "Fixes #12"
 at 1791102000 && git notes add -m "Reviewed-by: Grace Hopper <grace@example.com>" HEAD

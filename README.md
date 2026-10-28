@@ -12,14 +12,27 @@ It lets AI assistants inspect a Git repository through typed tools with structur
 - **Context to attach.** Commits, files and diffs are also served as `gitrs://` resources (for example the staged changes), with completion of revisions and paths. Prompts such as `write_commit_message` and `review_changes` come filled in with the diff they need.
 - **Pure Rust.** It runs as a single static binary that speaks MCP over stdio, and it doesn't need `libgit2` or the `git` executable.
 
-> **Status:** all six phases of the [roadmap](ROADMAP.md) are done, and 0.1.0 is ready to release: 28 read-only tools covering status, diffs, merge previews and conflicts, file contents, code search, ignore and attribute rules, history, blame, refs, tags, reflogs, stashes, notes, worktrees, submodules, config and object stats; and, with `--allow-write`, 22 write tools for the local edit, stage, commit and branch loop, plus merges, cherry-picks, reverts, rebases, stashes, hard resets, `clean` and worktrees. Merges and rebases that stop on conflicts leave git's own state, so you can finish them with either gitrs-mcp or git. On top of the tools come `gitrs://` resources, prompts, completion, progress and cancellation, change notifications (`--watch`), and several repositories per server.
+> **Status:** all six build phases are done, and 0.1.0 is ready to release: 28 read-only tools covering status, diffs, merge previews and conflicts, file contents, code search, ignore and attribute rules, history, blame, refs, tags, reflogs, stashes, notes, worktrees, submodules, config and object stats; and, with `--allow-write`, 22 write tools for the local edit, stage, commit and branch loop, plus merges, cherry-picks, reverts, rebases, stashes, hard resets, `clean` and worktrees. Merges and rebases that stop on conflicts leave git's own state, so you can finish them with either gitrs-mcp or git. On top of the tools come `gitrs://` resources, prompts, completion, progress and cancellation, change notifications (`--watch`), and several repositories per server.
+
+## Quick start
+
+```sh
+brew install prasenjit-net/tap/gitrs-mcp    # or any install route below (once 0.1.0 is released)
+gitrs-mcp setup                              # pick the agents to register it with
+```
+
+`gitrs-mcp setup` finds Claude Code, Claude Desktop, Cursor, VS Code and Codex CLI on your machine and registers the server with the ones you choose, showing every change first. It never turns on write tools unless you ask. `gitrs-mcp setup --status` shows where it is registered and `--remove` undoes it. Details: [docs/configuration.md](docs/configuration.md#registering-with-your-agents-gitrs-mcp-setup).
 
 ## Install
 
 Once the first release is published, prebuilt binaries for macOS, Linux and Windows are attached to each [GitHub release](https://github.com/prasenjit-net/gitrs-mcp/releases), with installers:
 
 ```sh
-# macOS and Linux
+# macOS and Linux: installs to ~/.local/bin, checks the checksum, then offers `gitrs-mcp setup`
+curl -fsSL https://raw.githubusercontent.com/prasenjit-net/gitrs-mcp/master/install.sh | sh
+# (options: --version v0.1.0, --dir <path>, --no-setup, --dry-run, --uninstall; add them after `sh -s --`)
+
+# or cargo-dist's installer (installs to ~/.cargo/bin; run `gitrs-mcp setup` afterwards)
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/prasenjit-net/gitrs-mcp/releases/latest/download/gitrs-mcp-installer.sh | sh
 
 # Windows (PowerShell)
@@ -46,10 +59,14 @@ make install          # cargo install --path . --locked
 ## Usage
 
 ```
-gitrs-mcp [OPTIONS]
+gitrs-mcp [OPTIONS] [COMMAND]
+
+Commands:
+  setup              Register gitrs-mcp with AI agents (see Quick start)
 
 Options:
-  -r, --repo <REPO>  Repository to serve; any path inside a worktree works (default: .).
+  -r, --repo <REPO>  Repository to serve; any path inside a worktree works (default: the one
+                     containing the working directory, if any).
                      Repeat to serve several; the first is the default
       --allow-write  Enable tools that modify the repository
       --watch        Notify clients when subscribed gitrs:// resources change
@@ -59,7 +76,9 @@ Options:
 
 The server talks MCP over stdin/stdout and logs to stderr. Set the log level with `GITRS_LOG` (for example `GITRS_LOG=debug`).
 
-### Claude Code
+### Registering by hand
+
+`gitrs-mcp setup` does this for you. To do it yourself, for Claude Code:
 
 ```sh
 claude mcp add gitrs -- gitrs-mcp --repo /path/to/repo
@@ -80,7 +99,7 @@ From a clone, `make mcp-add REPO=/path/to/repo` builds a release binary and regi
 }
 ```
 
-Copy-paste setup for Claude Code, Claude Desktop, VS Code and Cursor, logging, and the git settings that affect results are in [docs/configuration.md](docs/configuration.md).
+The `setup` reference, copy-paste setup for Claude Code, Claude Desktop, VS Code, Cursor and Codex, logging, and the git settings that affect results are in [docs/configuration.md](docs/configuration.md).
 
 ## Tools
 
@@ -144,7 +163,7 @@ With `--allow-write`, these write tools are added:
 | `worktree_add` | `path`, `target`, `create?`, `start_point?`, `detach?` | Adds a linked worktree like `git worktree add` |
 | `worktree_remove` | `worktree`, `force?`, `dry_run?` (default **true**) | Removes a linked worktree like `git worktree remove`; its branch is kept |
 
-The full reference, with every argument, result field, error and a real example per tool, is in [docs/tools.md](docs/tools.md). What's next is in [ROADMAP.md](ROADMAP.md).
+The full reference, with every argument, result field, error and a real example per tool, is in [docs/tools.md](docs/tools.md). What's next is in [PLAN.md](PLAN.md).
 
 ## Documentation
 

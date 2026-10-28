@@ -68,6 +68,10 @@ struct Served {
     source: Source,
 }
 
+/// What a call gets when the server started outside a repository and the client has no roots.
+const NO_REPOSITORY: &str = "no repository is being served: open a folder inside a git repository \
+     in your client, or add `--repo <path>` to this server's registration";
+
 /// The served repositories. The first one is the default; it always comes from the command line.
 pub(crate) struct Repos {
     list: RwLock<Vec<Served>>,
@@ -134,7 +138,7 @@ impl Repos {
             return list
                 .first()
                 .map(|s| s.handle.clone())
-                .ok_or_else(|| "no repository is being served".to_owned());
+                .ok_or_else(|| NO_REPOSITORY.to_owned());
         };
         if let Some(served) = list.iter().find(|s| s.name == wanted) {
             return Ok(served.handle.clone());

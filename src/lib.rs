@@ -6,6 +6,7 @@
 
 mod repo;
 mod server;
+pub mod setup;
 mod tools;
 
 pub use repo::RepoHandle;

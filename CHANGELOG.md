@@ -4,6 +4,9 @@ All notable changes to gitrs-mcp are listed here. The project follows [semantic 
 
 ## Unreleased
 
+- **`gitrs-mcp setup`** registers the server with Claude Code, Claude Desktop, Cursor, VS Code and Codex CLI: `--client`, `--all`, `--scope`, `--repo`, `--allow-write`, `--dry-run`, `--force`, plus `--status`, `--remove` and `--print`. It backs up and atomically replaces the files it edits, refuses files it can't parse, and never enables write tools unless asked. See [docs/configuration.md](docs/configuration.md#registering-with-your-agents-gitrs-mcp-setup).
+- **The server starts outside a repository** when no `--repo` is given, serving the client's roots once it sends them. Tools say what to do until a repository is served. An explicit `--repo` that isn't a repository is still an error.
+
 ## 0.1.0
 
 The first release.

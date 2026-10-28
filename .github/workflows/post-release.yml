@@ -1,0 +1,30 @@
+# After a release is published, install it the way a user would: the real `curl | sh` against the
+# real release assets, then the binary and its `setup` command.
+name: Post-release check
+
+on:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+  workflow_dispatch:
+
+jobs:
+  install-script:
+    # A failed or skipped release has nothing to install.
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    name: install.sh (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Install with the published script
+        run: curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/prasenjit-net/gitrs-mcp/master/install.sh | sh -s -- --no-setup
+      - name: The binary runs and registers
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          gitrs-mcp --version
+          gitrs-mcp setup --print --client cursor
+          gitrs-mcp setup --client cursor --yes
+          gitrs-mcp setup --status --client cursor

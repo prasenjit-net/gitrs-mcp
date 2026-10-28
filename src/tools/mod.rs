@@ -113,7 +113,8 @@ pub struct LogEntry {
     pub summary: String,
     /// Who wrote the change, and when.
     pub author: Signature,
-    /// Full SHAs of the parent commits; empty for a root commit.
+    /// Full SHAs of the parent commits; empty for a root commit, and for the oldest fetched commit
+    /// of a shallow clone, as git shows it.
     pub parents: Vec<String>,
 }
 
@@ -124,9 +125,26 @@ impl LogEntry {
             short_id: commit.short_id()?.to_string(),
             summary: commit.message()?.summary().to_string(),
             author: Signature::from_ref(commit.author()?)?,
-            parents: commit.parent_ids().map(|p| p.to_string()).collect(),
+            parents: visible_parents(commit)?
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
         })
     }
+}
+
+/// A commit's parents as git sees them. The boundary commits of a shallow clone have none: their
+/// recorded parents were never fetched, and git treats them as root commits.
+pub fn visible_parents<'repo>(commit: &gix::Commit<'repo>) -> anyhow::Result<Vec<gix::Id<'repo>>> {
+    let boundary = commit
+        .repo
+        .shallow_commits()?
+        .is_some_and(|shallow| shallow.contains(&commit.id));
+    Ok(if boundary {
+        Vec::new()
+    } else {
+        commit.parent_ids().collect()
+    })
 }
 
 /// How a path changed between two versions.
@@ -499,6 +517,15 @@ pub(crate) mod testutil {
         git(&["commit", "-q", "-am", "second commit\n\nwith a body"]);
         git(&["tag", "v1"]);
         git(&["branch", "feature"]);
+        let repo = open(dir.path());
+        (dir, repo)
+    }
+
+    /// A `--depth 1` clone of `source`: HEAD's parents are recorded in the commit but missing.
+    pub fn shallow_clone(source: &Path) -> (tempfile::TempDir, gix::Repository) {
+        let dir = tempfile::tempdir().unwrap();
+        let url = format!("file://{}", source.display());
+        run_git(dir.path(), &["clone", "-q", "--depth", "1", &url, "."]);
         let repo = open(dir.path());
         (dir, repo)
     }

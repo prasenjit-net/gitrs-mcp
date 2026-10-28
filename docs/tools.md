@@ -50,7 +50,7 @@ The examples come from a small demo repository, which [`scripts/demo-repo.sh`](.
 | `short_id` | string | Abbreviated SHA, unique within the repository. |
 | `summary` | string | First line of the commit message. |
 | `author` | Signature | Who wrote the change, and when. |
-| `parents` | string[] | Full SHAs of the parent commits; empty for a root commit. |
+| `parents` | string[] | Full SHAs of the parent commits; empty for a root commit, and for the oldest fetched commit of a shallow clone, as git shows it. |
 
 **ChangeKind**: how a path changed. One of `added`, `modified`, `deleted`, `renamed`, `copied`, `typechange`. A `typechange` is a switch between regular file, symlink and submodule. Flipping only the executable bit counts as `modified`.
 
@@ -948,7 +948,7 @@ Which commit last changed each line of a file at a revision, following renames l
 | `hunks[].original_start_line` | integer | Line in `original_path` at that commit where the hunk starts (1-based). |
 | `truncated` | boolean | True if hunks were cut off at `limit`. |
 
-**Errors:** the path doesn't exist at the revision or isn't a file; `line_range` is outside the file (the message gives the line count).
+**Errors:** the path doesn't exist at the revision or isn't a file; `line_range` is outside the file (the message gives the line count). In a shallow clone, blaming lines older than the fetched history fails with a message to run `git fetch --unshallow`; git instead attributes them to the oldest fetched commit.
 
 **Example**
 
@@ -1237,7 +1237,7 @@ Full metadata and message of one commit.
 |---|---|---|
 | `id` | string | Full commit SHA. |
 | `tree` | string | Full SHA of the commit's root tree. |
-| `parents` | string[] | Full SHAs of the parent commits; empty for a root commit. |
+| `parents` | string[] | Full SHAs of the parent commits; empty for a root commit, and for the oldest fetched commit of a shallow clone, as git shows it. |
 | `author` | Signature | Who wrote the change, and when. |
 | `committer` | Signature | Who created the commit, and when; differs from `author` after rebases and cherry-picks. |
 | `summary` | string | First line of the commit message. |

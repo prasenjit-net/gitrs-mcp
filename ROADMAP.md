@@ -451,6 +451,8 @@ gix has no sequencer, so this phase is where we build our own logic on its primi
 | Environment variables appear as configuration (found in Phase 2) | The config snapshot contains values gix derives from `GIT_EDITOR`, `HTTPS_PROXY` and others (some under `gitoxide.*` keys), which `git config --list` doesn't show | `config_get` leaves out `Source::EnvOverride` sections |
 | `key =` and a bare `key` look the same when iterating config (found in Phase 2) | The section iterator yields an empty value for both, but git reads the first as the empty string and the second as `true` | `config_get` asks `value_implicit` for empty values |
 | Index writes keep a stale cache-tree (found in Phase 3) | `gix_index::File::write` writes the `TREE` extension unchanged after entries change, so a later `git commit` could record outdated subtrees ([gitoxide#2421](https://github.com/GitoxideLabs/gitoxide/issues/2421)) | `update_index` writes only the end-of-index-entry extension; git rebuilds the rest |
+| A bare `.` pathspec is matched literally (found in Phase 6) | gix leaves `.` and `./` unnormalized, so with case-sensitive matching (Linux) they match nothing: `restore` and `reset` with `paths: ["."]` failed. macOS hid it, since `core.ignoreCase` routes matching elsewhere | `pathspec_patterns` passes whole-tree patterns as `:/` |
+| Blame doesn't know about shallow clones (found in Phase 6) | `blame_file` follows a boundary commit's recorded parents, which aren't there, and fails; git attributes the remaining lines to the boundary commit | `blame` explains the cause and suggests `git fetch --unshallow`. History walks and `parents` use `visible_parents`, which treats boundary commits as roots, as git does |
 | Unified diff output differs from git (found in Phase 1) | gix's unified-diff helpers print `,1` ranges and no function context, and its default line input strips terminators, which loses `\ No newline at end of file` | Own hunk writer in `tools/diff.rs` on top of gix's line diff |
 
 ## Milestone summary
@@ -461,6 +463,6 @@ gix has no sequencer, so this phase is where we build our own logic on its primi
 | 1 Core read | 9 | ~4.9k lines including tests (planned ~2–3k) | ✅ done |
 | 2 Deep read | 14 | ~2k LOC | ✅ done |
 | 3 Safe writes | 10 | ~2–3k LOC (index writing and checkout safety are the hard parts) | ✅ done |
-| 4 Rewriting | 8 | ~3–4k LOC (sequencer and stash) | 🚧 5 of 8 |
-| 5 MCP extras | resources, prompts, progress, multi-repo | ~1.5k LOC | planned |
-| 6 Hardening | — | ongoing | planned |
+| 4 Rewriting | 8 | ~3–4k LOC (sequencer and stash) | ✅ done |
+| 5 MCP extras | resources, prompts, progress, multi-repo | ~1.5k LOC | ✅ done |
+| 6 Hardening | — | ongoing | ✅ done |

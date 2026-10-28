@@ -98,7 +98,7 @@
                 "type": "string"
               },
               "parents": {
-                "description": "Full SHAs of the parent commits; empty for a root commit.",
+                "description": "Full SHAs of the parent commits; empty for a root commit, and for the oldest fetched commit\nof a shallow clone, as git shows it.",
                 "items": {
                   "type": "string"
                 },
@@ -760,7 +760,7 @@
                 "type": "string"
               },
               "parents": {
-                "description": "Full SHAs of the parent commits; empty for a root commit.",
+                "description": "Full SHAs of the parent commits; empty for a root commit, and for the oldest fetched commit\nof a shallow clone, as git shows it.",
                 "items": {
                   "type": "string"
                 },
@@ -1211,7 +1211,7 @@
             "type": "string"
           },
           "parents": {
-            "description": "Full SHAs of the parent commits; empty for a root commit.",
+            "description": "Full SHAs of the parent commits; empty for a root commit, and for the oldest fetched commit\nof a shallow clone, as git shows it.",
             "items": {
               "type": "string"
             },
@@ -1295,7 +1295,7 @@
                 "type": "string"
               },
               "parents": {
-                "description": "Full SHAs of the parent commits; empty for a root commit.",
+                "description": "Full SHAs of the parent commits; empty for a root commit, and for the oldest fetched commit\nof a shallow clone, as git shows it.",
                 "items": {
                   "type": "string"
                 },
@@ -1872,7 +1872,7 @@
                 "type": "string"
               },
               "parents": {
-                "description": "Full SHAs of the parent commits; empty for a root commit.",
+                "description": "Full SHAs of the parent commits; empty for a root commit, and for the oldest fetched commit\nof a shallow clone, as git shows it.",
                 "items": {
                   "type": "string"
                 },
@@ -2956,7 +2956,7 @@
                 ]
               },
               "parents": {
-                "description": "Full SHAs of the parent commits; empty for a root commit.",
+                "description": "Full SHAs of the parent commits; empty for a root commit, and for the oldest fetched commit\nof a shallow clone, as git shows it.",
                 "items": {
                   "type": "string"
                 },
@@ -3945,7 +3945,7 @@
                 "type": "string"
               },
               "parents": {
-                "description": "Full SHAs of the parent commits; empty for a root commit.",
+                "description": "Full SHAs of the parent commits; empty for a root commit, and for the oldest fetched commit\nof a shallow clone, as git shows it.",
                 "items": {
                   "type": "string"
                 },
@@ -4122,7 +4122,7 @@
                 "type": "string"
               },
               "parents": {
-                "description": "Full SHAs of the parent commits; empty for a root commit.",
+                "description": "Full SHAs of the parent commits; empty for a root commit, and for the oldest fetched commit\nof a shallow clone, as git shows it.",
                 "items": {
                   "type": "string"
                 },
@@ -4932,7 +4932,7 @@
                 "type": "string"
               },
               "parents": {
-                "description": "Full SHAs of the parent commits; empty for a root commit.",
+                "description": "Full SHAs of the parent commits; empty for a root commit, and for the oldest fetched commit\nof a shallow clone, as git shows it.",
                 "items": {
                   "type": "string"
                 },
@@ -5965,7 +5965,7 @@
                 "type": "string"
               },
               "parents": {
-                "description": "Full SHAs of the parent commits; empty for a root commit.",
+                "description": "Full SHAs of the parent commits; empty for a root commit, and for the oldest fetched commit\nof a shallow clone, as git shows it.",
                 "items": {
                   "type": "string"
                 },
@@ -6262,7 +6262,7 @@
                 "type": "string"
               },
               "parents": {
-                "description": "Full SHAs of the parent commits; empty for a root commit.",
+                "description": "Full SHAs of the parent commits; empty for a root commit, and for the oldest fetched commit\nof a shallow clone, as git shows it.",
                 "items": {
                   "type": "string"
                 },
@@ -6415,7 +6415,7 @@
             "type": "string"
           },
           "parents": {
-            "description": "Full SHAs of the parent commits; empty for a root commit.",
+            "description": "Full SHAs of the parent commits; empty for a root commit, and for the oldest fetched commit\nof a shallow clone, as git shows it.",
             "items": {
               "type": "string"
             },

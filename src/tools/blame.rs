@@ -94,7 +94,15 @@ pub fn blame(
         total: None,
         message: format!("blaming {path} ({line_count} lines)"),
     });
-    let outcome = repo.blame_file(path.as_ref(), commit.id, options)?;
+    let outcome = match repo.blame_file(path.as_ref(), commit.id, options) {
+        Ok(outcome) => outcome,
+        // gix's blame follows recorded parents, so it fails at a shallow clone's boundary, where git
+        // would stop and attribute the remaining lines to the boundary commit.
+        Err(err) if repo.is_shallow().unwrap_or(false) => bail!(
+            "cannot blame `{path}` in a shallow clone: history before the fetched commits is missing ({err}); run `git fetch --unshallow`, then try again"
+        ),
+        Err(err) => return Err(err.into()),
+    };
     watch.check()?;
 
     let limit = page_limit(args.limit, DEFAULT_BLAME_LIMIT, MAX_BLAME_LIMIT);
@@ -160,7 +168,9 @@ fn commit_info(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tools::testutil::{empty_repo, fixture_repo, git_stdout, open, run_git, write};
+    use crate::tools::testutil::{
+        empty_repo, fixture_repo, git_stdout, open, run_git, shallow_clone, write,
+    };
 
     fn args(path: &str) -> BlameArgs {
         BlameArgs {
@@ -259,6 +269,20 @@ mod tests {
         let res = blame(&repo, a, &Watch::none()).unwrap();
         assert_eq!(res.hunks.len(), 1);
         assert!(res.truncated);
+    }
+
+    #[test]
+    fn shallow_clones_say_how_to_get_the_history() {
+        let (source, _) = blame_fixture();
+        let (_dir, repo) = shallow_clone(source.path());
+        let err = format!(
+            "{:#}",
+            blame(&repo, args("tale.txt"), &Watch::none()).unwrap_err()
+        );
+        assert!(
+            err.contains("shallow clone") && err.contains("git fetch --unshallow"),
+            "{err}"
+        );
     }
 
     #[test]

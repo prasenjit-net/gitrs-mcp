@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     ChangeKind, LogEntry, Signature, page_limit, paginate_built, progress::Watch, repo_file_path,
-    repo_path, resolve_commit,
+    repo_path, resolve_commit, visible_parents,
 };
 
 const DEFAULT_LOG_LIMIT: usize = 20;
@@ -73,7 +73,8 @@ pub struct CommitDetail {
     pub id: String,
     /// Full SHA of the commit's root tree.
     pub tree: String,
-    /// Full SHAs of the parent commits; empty for a root commit.
+    /// Full SHAs of the parent commits; empty for a root commit, and for the oldest fetched commit
+    /// of a shallow clone, as git shows it.
     pub parents: Vec<String>,
     /// Who wrote the change, and when.
     pub author: Signature,
@@ -90,7 +91,10 @@ pub fn show_commit(repo: &gix::Repository, args: ShowCommitArgs) -> anyhow::Resu
     Ok(CommitDetail {
         id: commit.id.to_string(),
         tree: commit.tree_id()?.to_string(),
-        parents: commit.parent_ids().map(|p| p.to_string()).collect(),
+        parents: visible_parents(&commit)?
+            .iter()
+            .map(ToString::to_string)
+            .collect(),
         author: Signature::from_ref(commit.author()?)?,
         committer: Signature::from_ref(commit.committer()?)?,
         summary: commit.message()?.summary().to_string(),
@@ -361,7 +365,7 @@ impl<'repo> PathHistory<'repo> {
         let commit = self.repo.find_commit(id)?;
         let ours = entry_at(&commit, self.path.as_ref())?;
         let mut parents = Vec::new();
-        for parent_id in commit.parent_ids() {
+        for parent_id in visible_parents(&commit)? {
             let parent = parent_id.object()?.into_commit();
             let theirs = entry_at(&parent, self.path.as_ref())?;
             if same_entry(ours.as_ref(), theirs.as_ref()) {
@@ -438,7 +442,7 @@ fn rename_source(
     commit: &gix::Commit<'_>,
     path: &BStr,
 ) -> anyhow::Result<Option<BString>> {
-    let Some(parent) = commit.parent_ids().next() else {
+    let Some(parent) = visible_parents(commit)?.into_iter().next() else {
         return Ok(None);
     };
     let old_tree = parent.object()?.into_commit().tree()?;
@@ -459,7 +463,7 @@ fn rename_source(
 mod tests {
     use super::*;
     use crate::tools::testutil::{
-        empty_repo, fixture_repo, git_stdout, open, run_git, run_git_with_env, write,
+        empty_repo, fixture_repo, git_stdout, open, run_git, run_git_with_env, shallow_clone, write,
     };
 
     fn log_args(limit: Option<usize>, skip: Option<usize>) -> LogArgs {
@@ -614,6 +618,30 @@ mod tests {
             let ours: Vec<_> = res.commits.iter().map(|c| c.commit.id.clone()).collect();
             assert_eq!(ours, git_ids(dir.path(), &["--", path]), "{path}");
         }
+    }
+
+    #[test]
+    fn shallow_clones_end_history_at_the_boundary_like_git() {
+        let (source, _) = history_fixture();
+        let (dir, repo) = shallow_clone(source.path());
+        let root = dir.path();
+        // git treats the boundary commit as a root: its recorded parents were never fetched.
+        let git_parents = git_stdout(root, &["log", "-1", "--format=%P"]);
+        let head = show_commit(&repo, ShowCommitArgs { rev: None }).unwrap();
+        assert_eq!(head.parents.join(" "), git_parents.trim());
+        let logged = log(&repo, log_args(None, None), &Watch::none()).unwrap();
+        assert_eq!(logged.commits[0].parents, head.parents);
+        for path in ["a.txt", "src", "src/lib.rs", "missing.txt"] {
+            let res = file_history(&repo, history_args(path), &Watch::none()).unwrap();
+            let ours: Vec<_> = res.commits.iter().map(|c| c.commit.id.clone()).collect();
+            assert_eq!(ours, git_ids(root, &["--", path]), "{path}");
+        }
+        // Following renames diffs the boundary commit against its (missing) parent too.
+        let mut args = history_args("src/lib.rs");
+        args.follow_renames = true;
+        let res = file_history(&repo, args, &Watch::none()).unwrap();
+        let ours: Vec<_> = res.commits.iter().map(|c| c.commit.id.clone()).collect();
+        assert_eq!(ours, git_ids(root, &["--follow", "--", "src/lib.rs"]));
     }
 
     #[test]

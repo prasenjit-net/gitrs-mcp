@@ -504,7 +504,8 @@ mod tests {
 
     use super::*;
     use crate::tools::testutil::{
-        bare_repo, empty_repo, fixture_repo, git_stdout, open, run_git, try_git, write,
+        bare_repo, empty_repo, fixture_repo, git_stdout, open, run_git, shallow_clone, try_git,
+        write,
     };
 
     fn text(contents: Contents) -> String {
@@ -553,6 +554,16 @@ mod tests {
         assert_eq!(
             read(&repo, "gitrs://commit/HEAD").unwrap().mime_type,
             "text/x-diff"
+        );
+    }
+
+    #[test]
+    fn shallow_boundary_commits_show_like_root_commits() {
+        let (source, _) = fixture_repo();
+        let (dir, repo) = shallow_clone(source.path());
+        assert_eq!(
+            read_text(&repo, "gitrs://commit/HEAD"),
+            git_stdout(dir.path(), &["show", "--no-color", "HEAD"])
         );
     }
 

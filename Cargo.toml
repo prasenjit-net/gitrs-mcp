@@ -20,5 +20,5 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 
 [dev-dependencies]
 tempfile = "3.27.0"
-# An in-process MCP client, so tests can drive the server through the real protocol.
-rmcp = { version = "3.7.0", features = ["client"] }
+# An MCP client, so tests can drive the server through the real protocol, in process or as a child.
+rmcp = { version = "3.7.0", features = ["client", "transport-child-process"] }

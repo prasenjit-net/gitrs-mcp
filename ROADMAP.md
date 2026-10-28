@@ -14,7 +14,7 @@ _Last updated 2026-10-27._
 | 3 Safe writes | ✅ Done: 10 tools behind `--allow-write`, each checked against the git CLI |
 | 4 History rewriting | ✅ Done: 12 tools behind `--allow-write`, each checked against the git CLI, with git and gitrs-mcp able to continue each other's operations |
 | 5 MCP-native extras | ✅ Done: resources, prompts, completion, progress and cancellation, `--watch`, several repositories, caching and benchmarks |
-| 6 Hardening and release | 🚧 In progress: security review done |
+| 6 Hardening and release | 🚧 In progress: security review and integration tests done |
 
 The server has 28 read-only tools, plus 22 write tools registered only with `--allow-write`, along with resources, prompts and completion. 262 unit tests and the end-to-end smoke test pass, with 96.7% line coverage.
 
@@ -406,7 +406,7 @@ gix has no sequencer, so this phase is where we build our own logic on its primi
   - Ownership checks: gix's `git_dir_trust`, the equivalent of git's `safe.directory`.
   - Redaction: config values with secrets are redacted.
 - **Fuzzing** of argument parsing and revspecs (`cargo fuzz`), plus large-repo stress tests (git.git, linux.git).
-- **Integration tests** through a real MCP client (`rmcp` `client` + `transport-child-process` features) that spawns the binary.
+- **Integration tests** ✅ through a real MCP client (`rmcp` `client` + `transport-child-process` features) that spawns the binary.
 - **Distribution.**
   - `cargo install gitrs-mcp`, prebuilt binaries via `cargo-dist`, a Homebrew tap.
   - Docs with copy-paste client config for Claude Code (`claude mcp add gitrs -- gitrs-mcp --repo .`), Claude Desktop, VS Code and Cursor.
@@ -419,6 +419,7 @@ gix has no sequencer, so this phase is where we build our own logic on its primi
   - `config_get` redacted URL passwords in values but not in subsection names, so `url.https://user:pass@host/.insteadOf` showed the password in the key. Subsections are redacted too now.
   - gix's checkout already refuses hostile trees that write into `.git` (CVE-2014-9390). A test now proves it for `switch`.
   - Repositories the current user doesn't own, and that aren't listed in `safe.directory`, get reduced trust from gix, which ignores their repository-local config. gitrs-mcp keeps reads working there but refuses every write tool, closer to git, which refuses such repositories altogether. `repo_info` gained a `trusted` field.
+- **Integration tests.** `tests/stdio.rs` spawns the binary with rmcp's `transport-child-process` and covers start-up, flags, several repositories and launching from a subdirectory. The in-process protocol tests from Phase 5 remain the place for detailed behaviour. They're faster and can inspect state.
 
 ---
 

@@ -1,0 +1,103 @@
+//! File contents and line history.
+
+use rmcp::{
+    RoleServer,
+    handler::server::wrapper::{Json, Parameters},
+    service::RequestContext,
+    tool, tool_router,
+};
+
+use super::{GitServer, repos::InRepo};
+use crate::tools;
+
+#[tool_router(router = files_router, vis = "pub(super)")]
+impl GitServer {
+    /// Read a file at a revision (default HEAD), from the index (`rev: "index"`) or from the working
+    /// tree (`rev: "worktree"`). Text is returned as UTF-8 and binary content as base64. At most
+    /// `max_bytes` (default 64 KiB) per call; continue a truncated read with `offset_bytes: next_offset`.
+    #[tool(annotations(title = "Read file", read_only_hint = true))]
+    async fn read_file(
+        &self,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::files::ReadFileArgs>>,
+    ) -> Result<Json<tools::files::ReadFileResult>, String> {
+        self.repo(repo)?
+            .run(move |r| tools::files::read_file(r, args))
+            .await
+            .map(Json)
+    }
+
+    /// List the files and directories of a revision's tree (default HEAD), like `git ls-tree`.
+    /// Shows one directory level by default; `recursive: true` lists every file below `path`.
+    /// Paginated (`limit`, default 500).
+    #[tool(annotations(title = "List tree", read_only_hint = true))]
+    async fn list_tree(
+        &self,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::files::ListTreeArgs>>,
+    ) -> Result<Json<tools::files::ListTreeResult>, String> {
+        self.repo(repo)?
+            .run(move |r| tools::files::list_tree(r, args))
+            .await
+            .map(Json)
+    }
+
+    /// Which commit last changed each line of a file at a revision (default HEAD), following renames
+    /// like `git blame`. Returns hunks of consecutive lines with commit, author and summary. Narrow
+    /// big files with `line_range`; at most `limit` hunks (default 200) per call.
+    #[tool(annotations(title = "Blame", read_only_hint = true))]
+    async fn blame(
+        &self,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::blame::BlameArgs>>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<Json<tools::blame::BlameResult>, String> {
+        self.run_watched(self.repo(repo)?, context, move |r, w| {
+            tools::blame::blame(r, args, w)
+        })
+        .await
+        .map(Json)
+    }
+
+    /// Search file contents for a regex, like `git grep`: tracked files in the working tree by default,
+    /// or the index (`rev: "index"`) or any revision. Returns path, line, column and the line's text,
+    /// ordered by path. Skips binary files, symlinks and untracked files. Narrow with `pathspec`;
+    /// paginated (`limit`, default 100).
+    #[tool(annotations(title = "Grep", read_only_hint = true))]
+    async fn grep(
+        &self,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::grep::GrepArgs>>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<Json<tools::grep::GrepResult>, String> {
+        self.run_watched(self.repo(repo)?, context, move |r, w| {
+            tools::grep::grep(r, args, w)
+        })
+        .await
+        .map(Json)
+    }
+
+    /// Whether paths are ignored, and by which rule, like `git check-ignore -v`: the pattern, the file
+    /// it's in (`.gitignore`, `.git/info/exclude`, ...) and its line. Paths don't have to exist.
+    /// Tracked files are reported as not ignored, as git treats them. Up to 1000 paths per call.
+    #[tool(annotations(title = "Check ignore", read_only_hint = true))]
+    async fn check_ignore(
+        &self,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::attributes::CheckIgnoreArgs>>,
+    ) -> Result<Json<tools::attributes::CheckIgnoreResult>, String> {
+        self.repo(repo)?
+            .run(move |r| tools::attributes::check_ignore(r, args))
+            .await
+            .map(Json)
+    }
+
+    /// Git attributes of paths, like `git check-attr`: the named `attrs` (set, unset, a value, or
+    /// unspecified), or every attribute set on each path when `attrs` is empty. Use it to see how git
+    /// treats a file: `text`/`eol` line endings, `binary`, `diff` drivers, `linguist-*`. Up to 1000 paths.
+    #[tool(annotations(title = "Check attributes", read_only_hint = true))]
+    async fn check_attr(
+        &self,
+        Parameters(InRepo { repo, args }): Parameters<InRepo<tools::attributes::CheckAttrArgs>>,
+    ) -> Result<Json<tools::attributes::CheckAttrResult>, String> {
+        self.repo(repo)?
+            .run(move |r| tools::attributes::check_attr(r, args))
+            .await
+            .map(Json)
+    }
+}
